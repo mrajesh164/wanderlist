@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Show, UserButton } from "@clerk/nextjs";
 
 /**
  * The masthead: a wordmark that's always home, and three tabs that say what
@@ -35,11 +36,51 @@ export function Nav() {
           Wanderlist
         </Link>
 
-        <Suspense fallback={<TabList active={null} />}>
-          <Tabs />
-        </Suspense>
+        <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+          <Suspense fallback={<TabList active={null} />}>
+            <Tabs />
+          </Suspense>
+          <AuthControls />
+        </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * Sign in, or the account menu once you're in.
+ *
+ * Behind its own Suspense boundary because `<Show>` reads the request. The
+ * fallback reserves the same height so the masthead doesn't reflow when auth
+ * state resolves — the tabs would otherwise jump sideways on every load.
+ *
+ * Clerk's avatar is a circle by default, which Café Terrace doesn't permit
+ * (border radius is 0, controls may use 2px). Squared off to match.
+ */
+function AuthControls() {
+  return (
+    <div className="mb-2.5 flex items-center">
+      <Suspense fallback={<div aria-hidden="true" className="h-7 w-7" />}>
+        <Show when="signed-out">
+          <Link
+            href="/sign-in"
+            className="font-sans text-small text-accent hover:text-ink"
+          >
+            Sign in
+          </Link>
+        </Show>
+        <Show when="signed-in">
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: "rounded-none size-7",
+                userButtonPopoverCard: "rounded-none",
+              },
+            }}
+          />
+        </Show>
+      </Suspense>
+    </div>
   );
 }
 
