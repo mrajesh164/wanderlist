@@ -281,6 +281,15 @@ which is being replaced — see **Data model** above.
   Assignment 3 submission until the work is reviewed and merged.
 - `AGENTS.md` (this file) is the context file. There must be no `CLAUDE.md`.
 
+**Keep the walkthrough's status panel current.** `../assignment-4-walkthrough.html`
+(one level up, outside the repo) carries a **Where this stands** panel: one row
+per assignment step, with what is actually built. Update it when a step changes
+state — finished, started, or found to be wrong — and not otherwise. A commit is
+not a milestone; "sign-in works and signed-out is locked out" is. Roughly one
+edit per step, eight or so for the whole assignment. Don't narrate progress into
+it, and don't touch the checkboxes below it: those are the user's, stored in
+their browser, and overwriting them isn't possible from here anyway.
+
 ## Stack notes that actually bite
 
 Next.js 16.4.2, React 19.3, Tailwind v4. Three things differ from older training data:
