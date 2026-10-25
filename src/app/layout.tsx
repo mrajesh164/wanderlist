@@ -1,3 +1,4 @@
+import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Fraunces, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
@@ -47,17 +48,19 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <script dangerouslySetInnerHTML={{ __html: HAS_TRIPS_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col bg-background text-ink">
-        <TripsProvider>
-          <Nav />
-          <main className="mx-auto w-full max-w-5xl flex-1 px-5 py-8">
-            {children}
-          </main>
-          <footer className="mx-auto w-full max-w-5xl px-5 pb-8">
-            <div className="border-t border-rule pt-3">
-              <ResetFirstVisit />
-            </div>
-          </footer>
-        </TripsProvider>
+        <ClerkProvider>
+          <TripsProvider>
+            <Nav />
+            <main className="mx-auto w-full max-w-5xl flex-1 px-5 py-8">
+              {children}
+            </main>
+            <footer className="mx-auto w-full max-w-5xl px-5 pb-8">
+              <div className="border-t border-rule pt-3">
+                <ResetFirstVisit />
+              </div>
+            </footer>
+          </TripsProvider>
+        </ClerkProvider>
       </body>
     </html>
   );
