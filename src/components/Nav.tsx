@@ -6,12 +6,18 @@ import { usePathname } from "next/navigation";
 import { Show, UserButton } from "@clerk/nextjs";
 
 /**
- * The masthead: a wordmark that's always home, and three tabs that say what
- * this thing is for.
+ * The masthead: a wordmark that's always home, and — once you're signed in —
+ * three tabs that say what this thing is for.
  *
  * The tabs carry the navigation requirement — it's clear where you are and how
  * to get back — and they give the app a readable shape: the trips you have,
  * adding one, and everything the tool has learned about what you pack.
+ *
+ * **Signed out, the tabs are hidden rather than disabled.** Every one of them
+ * redirects to sign-in, so showing them advertises four destinations and then
+ * refuses all four — a menu of locked doors, which is the dead-end screen this
+ * app is supposed to be the opposite of. Signed out you get a way in instead,
+ * and home explains what the app is.
  *
  * Tabs sit behind a Suspense boundary because `usePathname` suspends on
  * /trips/[id], whose param isn't known at build time. Without it, that one hook
@@ -36,50 +42,64 @@ export function Nav() {
           Wanderlist
         </Link>
 
-        <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-          <Suspense fallback={<TabList active={null} />}>
-            <Tabs />
-          </Suspense>
-          <AuthControls />
-        </div>
+        {/* One boundary for the whole right-hand side. Tabs and auth controls
+            both wait on the same answer, so splitting them into two boundaries
+            made the masthead settle in two visible stages. The fallback holds
+            the row's height so nothing below it jumps. */}
+        <Suspense fallback={<div aria-hidden="true" className="h-10" />}>
+          <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+            <Show when="signed-in">
+              <Suspense fallback={<TabList active={null} />}>
+                <Tabs />
+              </Suspense>
+              <AccountMenu />
+            </Show>
+            <Show when="signed-out">
+              <WayIn />
+            </Show>
+          </div>
+        </Suspense>
       </div>
     </header>
   );
 }
 
 /**
- * Sign in, or the account menu once you're in.
- *
- * Behind its own Suspense boundary because `<Show>` reads the request. The
- * fallback reserves the same height so the masthead doesn't reflow when auth
- * state resolves — the tabs would otherwise jump sideways on every load.
- *
- * Clerk's avatar is a circle by default, which Café Terrace doesn't permit
- * (border radius is 0, controls may use 2px). Squared off to match.
+ * Signed out: the two things worth offering. Plain links rather than Clerk's
+ * button components, because the routes already exist and Café Terrace wants
+ * its own type, not a vendor's.
  */
-function AuthControls() {
+function WayIn() {
+  return (
+    <nav aria-label="Account" className="mb-3 flex items-center gap-4">
+      <Link href="/sign-in" className="font-sans text-small text-ink hover:text-accent">
+        Sign in
+      </Link>
+      <Link
+        href="/sign-up"
+        className="font-sans text-small font-semibold text-accent hover:text-ink"
+      >
+        Create an account
+      </Link>
+    </nav>
+  );
+}
+
+/**
+ * Clerk's avatar is a circle by default, which Café Terrace doesn't permit —
+ * border radius is 0, controls may use 2px. Squared off to match.
+ */
+function AccountMenu() {
   return (
     <div className="mb-2.5 flex items-center">
-      <Suspense fallback={<div aria-hidden="true" className="h-7 w-7" />}>
-        <Show when="signed-out">
-          <Link
-            href="/sign-in"
-            className="font-sans text-small text-accent hover:text-ink"
-          >
-            Sign in
-          </Link>
-        </Show>
-        <Show when="signed-in">
-          <UserButton
-            appearance={{
-              elements: {
-                avatarBox: "rounded-none size-7",
-                userButtonPopoverCard: "rounded-none",
-              },
-            }}
-          />
-        </Show>
-      </Suspense>
+      <UserButton
+        appearance={{
+          elements: {
+            avatarBox: "rounded-none size-7",
+            userButtonPopoverCard: "rounded-none",
+          },
+        }}
+      />
     </div>
   );
 }
