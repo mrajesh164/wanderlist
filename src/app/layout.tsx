@@ -5,7 +5,6 @@ import "./globals.css";
 import { TripsProvider } from "./providers";
 import { Nav } from "@/components/Nav";
 import { ResetFirstVisit } from "@/components/ResetFirstVisit";
-import { HAS_TRIPS_SCRIPT } from "@/lib/storage";
 
 /* Café Terrace: Fraunces for display and headings, Source Sans for everything else. */
 const fraunces = Fraunces({
@@ -27,12 +26,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    /* suppressHydrationWarning because the inline script below sets
-       data-has-trips before React hydrates — the DOM is intentionally ahead of
-       the server's output here, and React should accept it. */
+    /* suppressHydrationWarning because TripsProvider rewrites data-has-trips
+       once the fetch resolves — the DOM is intentionally ahead of the server's
+       output here, and React should accept it. */
     <html
       lang="en"
-      data-has-trips="no"
+      /* "loading" until the provider knows. Trips come from Supabase now, so
+         the answer isn't on the device and can't be settled before paint; the
+         CSS gate hides both faces meanwhile rather than guessing wrong. */
+      data-has-trips="loading"
       /* globals.css sets scroll-behavior: smooth for in-page step links. This
          tells Next that's deliberate, so it stops warning and stops applying it
          to route changes — gliding between anchors is nice, gliding on every
@@ -42,10 +44,6 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${fraunces.variable} ${sourceSans.variable} h-full antialiased`}
     >
       <head>
-        {/* Runs synchronously during HTML parsing, so a returning person never
-            sees the first-visit screen flash past before hydration. Paired with
-            the lazy read in TripsProvider, which uses the same storage key. */}
-        <script dangerouslySetInnerHTML={{ __html: HAS_TRIPS_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col bg-background text-ink">
         <ClerkProvider>

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The single source of truth for trips.
+ * The single source of truth for trips — now backed by Supabase.
  *
  * This provider lives in the root layout, which matters more than it looks:
  * with `cacheComponents` on, Next keeps recently visited routes mounted via
@@ -9,29 +9,41 @@
  * of the trips state, navigating back to a route would show you a stale copy.
  * One provider above the routes avoids that entirely.
  *
- * Hydration: the first render returns EMPTY_STATE so it matches what the server
- * rendered — no mismatch. A useLayoutEffect then loads real data *before paint*,
- * and the inline script in <head> has already hidden the wrong branch via
- * data-has-trips, so a returning person never sees the first-visit screen.
+ * **Writes are optimistic.** Every mutation updates local state immediately and
+ * sends the row afterwards, because packing is a stream of small ticks and
+ * waiting for a round trip on each one would make the checklist feel broken. If
+ * a write fails, `error` is set and the whole snapshot is refetched — so the
+ * screen converges on what the database actually holds rather than quietly
+ * drifting from it.
+ *
+ * The public API is unchanged from the localStorage version on purpose: ten
+ * components consume `useTrips()`, and swapping the backend shouldn't touch any
+ * of them.
  */
 
 import {
   createContext,
   useCallback,
   useContext,
-  useLayoutEffect,
+  useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
-import { readState, writeState } from "@/lib/storage";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { useUser } from "@clerk/nextjs";
+import { supabaseConfigError, useSupabase } from "@/lib/supabase";
 import {
-  EMPTY_STATE,
-  type Item,
-  type ItemCategory,
-  type KitItem,
-  type StoredState,
-  type Trip,
-} from "@/lib/types";
+  deleteKitItem,
+  deleteTrip,
+  fetchSnapshot,
+  insertKitItems,
+  insertTrip,
+  saveKitQty,
+  saveTrip,
+  type Snapshot,
+} from "@/lib/trips-db";
+import type { Item, ItemCategory, KitItem, Trip } from "@/lib/types";
 
 /** One line of an inventory add: a label, and a count only if you gave one. */
 export type KitAddition = { label: string; qty?: number };
@@ -41,10 +53,14 @@ function clampQty(qty: number): number {
   return Math.max(1, Math.min(99, Math.round(qty)));
 }
 
+const EMPTY: Snapshot = { trips: [], kit: [] };
+
 type TripsContextValue = {
   trips: Trip[];
-  /** False until storage has been read; lets the UI hold a quiet placeholder. */
+  /** False until the first load resolves; lets the UI hold a quiet placeholder. */
   ready: boolean;
+  /** Set when a write or load failed. Null when everything is in step. */
+  error: string | null;
   addTrip: (trip: Trip) => void;
   updateTrip: (id: string, patch: (trip: Trip) => Trip) => void;
   removeTrip: (id: string) => void;
@@ -70,60 +86,155 @@ type TripsContextValue = {
 const TripsContext = createContext<TripsContextValue | null>(null);
 
 export function TripsProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<StoredState>(EMPTY_STATE);
-  const [ready, setReady] = useState(false);
+  const supabase = useSupabase();
+  const { user, isLoaded: userLoaded } = useUser();
+  const userId = user?.id ?? null;
+
+  const [state, setState] = useState<Snapshot>(EMPTY);
+  /** True once a fetch has resolved. Only ever set after an await. */
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(supabaseConfigError);
+
+  /* Derived rather than stored. Signed out there is nothing to wait for, so
+     "ready" is immediate — and deriving it means the effect below never has to
+     setState synchronously, which React rightly objects to. */
+  const ready = userLoaded && (!supabase || loaded);
+
+  /* Mutations need the current snapshot to compute the next one *and* the
+     resulting value to send to the database. A functional setState gives the
+     first but not the second, so the snapshot is mirrored in a ref and every
+     change goes through `apply`. */
+  const stateRef = useRef<Snapshot>(EMPTY);
+
+  const apply = useCallback((next: Snapshot) => {
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
+  /** Refetch after a refused write. Not used for the initial load — see below. */
+  const reload = useCallback(async () => {
+    if (!supabase) return;
+    try {
+      const snapshot = await fetchSnapshot(supabase);
+      apply(snapshot);
+      setError(supabaseConfigError);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoaded(true);
+    }
+  }, [supabase, apply]);
 
   /**
-   * Runs before the browser paints, so real data is on screen in the first
-   * frame the user actually sees.
+   * The initial load, written as callbacks rather than `await` on purpose.
    *
-   * eslint's react-hooks rule objects to setState inside an effect, and is
-   * normally right — but this is exactly the case the rule can't see. The first
-   * render *must* match the server (empty), and the real value *must* land
-   * before paint, or a returning person sees the first-visit screen. The Next
-   * docs prescribe this pattern; see preventing-flash-before-hydration.md and
-   * the HAS_TRIPS_SCRIPT comment in lib/storage.ts. It runs once, on mount.
+   * State is set inside `.then`/`.catch`, which is what React wants from an
+   * effect — synchronous setState in the body causes cascading renders. The
+   * `active` flag is the part that matters though: signing out and back in
+   * fires this twice, and without the guard a slow first fetch could land
+   * after a fast second one and show the previous account's trips.
    */
-  useLayoutEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setState(readState());
-    setReady(true);
-  }, []);
+  useEffect(() => {
+    if (!supabase) return;
+    let active = true;
 
-  const commit = useCallback((next: StoredState) => {
-    setState(next);
-    writeState(next);
-  }, []);
+    fetchSnapshot(supabase)
+      .then((snapshot) => {
+        if (!active) return;
+        apply(snapshot);
+        setError(supabaseConfigError);
+      })
+      .catch((cause: unknown) => {
+        if (!active) return;
+        setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (active) setLoaded(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [supabase, apply]);
+
+  /* Signed out shows nothing of anyone's, whatever happens to be left in
+     state — belt and braces alongside the middleware, and it means signing out
+     empties the screen without an effect to clear it. */
+  /* Memoised because the `[]` branch would otherwise be a fresh array on every
+     render, busting the context value's memo and re-rendering every consumer. */
+  const trips = useMemo(
+    () => (supabase ? state.trips : []),
+    [supabase, state.trips],
+  );
+  const kit = useMemo(
+    () => (supabase ? state.kit : []),
+    [supabase, state.kit],
+  );
+
+  /**
+   * Hand the answer to the CSS gate in globals.css, which decides whether home
+   * shows its first-visit face or its returning one. `<html>` ships as
+   * "loading" and both faces stay hidden until this runs — a frame of nothing
+   * beats a frame of the wrong screen for someone with six trips.
+   */
+  useEffect(() => {
+    if (!ready) return;
+    document.documentElement.dataset.hasTrips = trips.length > 0 ? "yes" : "no";
+  }, [ready, trips.length]);
+
+  /**
+   * Send a change, and reconcile if it's refused.
+   *
+   * A rejected write usually means an RLS policy said no, which in this app
+   * would mean a genuine bug rather than a transient failure — so refetching
+   * is the honest response: show what the database really has.
+   */
+  const write = useCallback(
+    async (fn: (db: SupabaseClient, uid: string) => Promise<void>) => {
+      if (!supabase || !userId) return;
+      try {
+        await fn(supabase, userId);
+        setError(null);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        void reload();
+      }
+    },
+    [supabase, userId, reload],
+  );
 
   const addTrip = useCallback(
     (trip: Trip) => {
-      setState((prev) => {
-        const next = { ...prev, trips: [...prev.trips, trip] };
-        writeState(next);
-        return next;
-      });
+      const prev = stateRef.current;
+      apply({ ...prev, trips: [...prev.trips, trip] });
+      void write((db, uid) => insertTrip(db, trip, uid));
     },
-    [],
+    [apply, write],
   );
 
-  const updateTrip = useCallback((id: string, patch: (trip: Trip) => Trip) => {
-    setState((prev) => {
-      const next = {
+  const updateTrip = useCallback(
+    (id: string, patch: (trip: Trip) => Trip) => {
+      const prev = stateRef.current;
+      const target = prev.trips.find((t) => t.id === id);
+      if (!target) return;
+      const patched = patch(target);
+      apply({
         ...prev,
-        trips: prev.trips.map((t) => (t.id === id ? patch(t) : t)),
-      };
-      writeState(next);
-      return next;
-    });
-  }, []);
+        trips: prev.trips.map((t) => (t.id === id ? patched : t)),
+      });
+      void write((db, uid) => saveTrip(db, patched, uid));
+    },
+    [apply, write],
+  );
 
-  const removeTrip = useCallback((id: string) => {
-    setState((prev) => {
-      const next = { ...prev, trips: prev.trips.filter((t) => t.id !== id) };
-      writeState(next);
-      return next;
-    });
-  }, []);
+  const removeTrip = useCallback(
+    (id: string) => {
+      const prev = stateRef.current;
+      apply({ ...prev, trips: prev.trips.filter((t) => t.id !== id) });
+      void write((db) => deleteTrip(db, id));
+    },
+    [apply, write],
+  );
 
   const toggleItem = useCallback(
     (tripId: string, itemId: string) => {
@@ -139,7 +250,7 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
 
   const setItemQty = useCallback(
     (tripId: string, itemId: string, qty: number) => {
-      const clamped = Math.max(1, Math.min(99, Math.round(qty)));
+      const clamped = clampQty(qty);
       updateTrip(tripId, (trip) => ({
         ...trip,
         items: trip.items.map((i) =>
@@ -156,48 +267,52 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
    * starts with it already there, and it joins your inventory — if you packed
    * it, you own it, and having to list it a second time would be busywork.
    */
-  const addItem = useCallback((tripId: string, item: Item) => {
-    setState((prev) => {
+  const addItem = useCallback(
+    (tripId: string, item: Item) => {
+      const prev = stateRef.current;
       const key = item.label.toLowerCase();
+      const target = prev.trips.find((t) => t.id === tripId);
+      if (!target) return;
 
-      const trips = prev.trips.map((trip) => {
-        if (trip.id !== tripId) return trip;
-        return {
-          ...trip,
-          items: [...trip.items, item],
-          learned: {
-            // Previously dropped? They've changed their mind — un-drop it.
-            drop: trip.learned.drop.filter((d) => d.toLowerCase() !== key),
-            add: trip.learned.add.some((a) => a.toLowerCase() === key)
-              ? trip.learned.add
-              : [...trip.learned.add, item.label],
-          },
-        };
-      });
+      const patched: Trip = {
+        ...target,
+        items: [...target.items, item],
+        learned: {
+          // Previously dropped? They've changed their mind — un-drop it.
+          drop: target.learned.drop.filter((d) => d.toLowerCase() !== key),
+          add: target.learned.add.some((a) => a.toLowerCase() === key)
+            ? target.learned.add
+            : [...target.learned.add, item.label],
+        },
+      };
 
       const alreadyOwned = prev.kit.some((k) => k.label.toLowerCase() === key);
-      const kit = alreadyOwned
-        ? prev.kit
-        : [
-            ...prev.kit,
-            {
-              id: crypto.randomUUID(),
-              label: item.label,
-              category: item.category,
-              /* Deliberately no qty. This add is a side effect of packing, not
-                 a statement about how many you own — nobody was shown a number
-                 to accept. The inventory infers one from trips instead, and the
-                 row stays out of the shortfall warnings until it has evidence.
-                 Don't "fix" this to 1; see resolveQty in lib/inventory.ts. */
-              addedAt: new Date().toISOString(),
-            },
-          ];
+      const fresh: KitItem | null = alreadyOwned
+        ? null
+        : {
+            id: crypto.randomUUID(),
+            label: item.label,
+            category: item.category,
+            /* Deliberately no qty. This add is a side effect of packing, not
+               a statement about how many you own — nobody was shown a number
+               to accept. The inventory infers one from trips instead, and the
+               row stays out of the shortfall warnings until it has evidence.
+               Don't "fix" this to 1; see resolveQty in lib/inventory.ts. */
+            addedAt: new Date().toISOString(),
+          };
 
-      const next = { ...prev, trips, kit };
-      writeState(next);
-      return next;
-    });
-  }, []);
+      apply({
+        trips: prev.trips.map((t) => (t.id === tripId ? patched : t)),
+        kit: fresh ? [...prev.kit, fresh] : prev.kit,
+      });
+
+      void write(async (db, uid) => {
+        await saveTrip(db, patched, uid);
+        if (fresh) await insertKitItems(db, [fresh], uid);
+      });
+    },
+    [apply, write],
+  );
 
   /**
    * Removing is the mirror image. A suggested item goes onto `learned.drop` so
@@ -219,7 +334,8 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
           learned: {
             add: trip.learned.add.filter((a) => a.toLowerCase() !== key),
             drop:
-              wasHandAdded || trip.learned.drop.some((d) => d.toLowerCase() === key)
+              wasHandAdded ||
+              trip.learned.drop.some((d) => d.toLowerCase() === key)
                 ? trip.learned.drop
                 : [...trip.learned.drop, item.label],
           },
@@ -237,34 +353,32 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
    */
   const addKitItems = useCallback(
     (entries: KitAddition[], category: string) => {
-      setState((prev) => {
-        const existing = new Set(prev.kit.map((k) => k.label.toLowerCase()));
-        const additions: KitItem[] = [];
-        for (const entry of entries) {
-          const trimmed = entry.label.trim();
-          if (!trimmed || existing.has(trimmed.toLowerCase())) continue;
-          existing.add(trimmed.toLowerCase());
-          additions.push({
-            id: crypto.randomUUID(),
-            label: trimmed,
-            category: category.trim() || "Extras",
-            /* Anything put through the inventory form starts at a real 1 rather
-               than an absent one. Someone who typed a thing in saw that number
-               and let it stand, which is a claim — unlike a row the app worked
-               out from trip history, where the 1 was nobody's idea. A 1 that
-               turns out to be wrong fixes itself: resolveQty takes the greater
-               of this and what's been packed. */
-            qty: clampQty(entry.qty ?? 1),
-            addedAt: new Date().toISOString(),
-          });
-        }
-        if (additions.length === 0) return prev;
-        const next = { ...prev, kit: [...prev.kit, ...additions] };
-        writeState(next);
-        return next;
-      });
+      const prev = stateRef.current;
+      const existing = new Set(prev.kit.map((k) => k.label.toLowerCase()));
+      const additions: KitItem[] = [];
+
+      for (const entry of entries) {
+        const trimmed = entry.label.trim();
+        if (!trimmed || existing.has(trimmed.toLowerCase())) continue;
+        existing.add(trimmed.toLowerCase());
+        additions.push({
+          id: crypto.randomUUID(),
+          label: trimmed,
+          category: category.trim() || "Extras",
+          /* Anything put through the inventory form starts at a real 1 rather
+             than an absent one. Someone who typed a thing in saw that number
+             and let it stand, which is a claim — unlike a row the app worked
+             out from trip history, where the 1 was nobody's idea. */
+          qty: clampQty(entry.qty ?? 1),
+          addedAt: new Date().toISOString(),
+        });
+      }
+
+      if (additions.length === 0) return;
+      apply({ ...prev, kit: [...prev.kit, ...additions] });
+      void write((db, uid) => insertKitItems(db, additions, uid));
     },
-    [],
+    [apply, write],
   );
 
   /**
@@ -278,47 +392,63 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
   const setKitQty = useCallback(
     (label: string, category: ItemCategory, qty: number) => {
       const clamped = clampQty(qty);
-      setState((prev) => {
-        const key = label.toLowerCase();
-        const known = prev.kit.some((k) => k.label.toLowerCase() === key);
-        const kit = known
-          ? prev.kit.map((k) =>
-              k.label.toLowerCase() === key ? { ...k, qty: clamped } : k,
-            )
-          : [
-              ...prev.kit,
-              {
-                id: crypto.randomUUID(),
-                label,
-                category,
-                qty: clamped,
-                addedAt: new Date().toISOString(),
-              },
-            ];
-        const next = { ...prev, kit };
-        writeState(next);
-        return next;
-      });
+      const prev = stateRef.current;
+      const key = label.toLowerCase();
+      const known = prev.kit.find((k) => k.label.toLowerCase() === key);
+
+      if (known) {
+        apply({
+          ...prev,
+          kit: prev.kit.map((k) =>
+            k.label.toLowerCase() === key ? { ...k, qty: clamped } : k,
+          ),
+        });
+        void write((db) => saveKitQty(db, known.id, clamped));
+        return;
+      }
+
+      const fresh: KitItem = {
+        id: crypto.randomUUID(),
+        label,
+        category,
+        qty: clamped,
+        addedAt: new Date().toISOString(),
+      };
+      apply({ ...prev, kit: [...prev.kit, fresh] });
+      void write((db, uid) => insertKitItems(db, [fresh], uid));
     },
-    [],
+    [apply, write],
   );
 
-  const removeKitItem = useCallback((id: string) => {
-    setState((prev) => {
-      const next = { ...prev, kit: prev.kit.filter((k) => k.id !== id) };
-      writeState(next);
-      return next;
-    });
-  }, []);
+  const removeKitItem = useCallback(
+    (id: string) => {
+      const prev = stateRef.current;
+      apply({ ...prev, kit: prev.kit.filter((k) => k.id !== id) });
+      void write((db) => deleteKitItem(db, id));
+    },
+    [apply, write],
+  );
 
+  /**
+   * Clear everything of yours. Powers "Reset to first visit", which exists
+   * because the onboarding is otherwise unreachable the moment it succeeds.
+   * It now deletes rows rather than clearing a key, so it really is a reset
+   * and not just a local forget.
+   */
   const resetEverything = useCallback(() => {
-    commit(EMPTY_STATE);
-  }, [commit]);
+    const prev = stateRef.current;
+    apply(EMPTY);
+    void write(async (db) => {
+      await Promise.all(prev.trips.map((t) => deleteTrip(db, t.id)));
+      await Promise.all(prev.kit.map((k) => deleteKitItem(db, k.id)));
+    });
+  }, [apply, write]);
 
   const value = useMemo<TripsContextValue>(
     () => ({
-      trips: state.trips,
+      trips,
       ready,
+      error,
       addTrip,
       updateTrip,
       removeTrip,
@@ -326,15 +456,17 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       setItemQty,
       addItem,
       removeItem,
-      kit: state.kit,
+      kit,
       addKitItems,
       setKitQty,
       removeKitItem,
       resetEverything,
     }),
     [
-      state.trips,
+      trips,
+      kit,
       ready,
+      error,
       addTrip,
       updateTrip,
       removeTrip,
@@ -342,7 +474,6 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       setItemQty,
       addItem,
       removeItem,
-      state.kit,
       addKitItems,
       setKitQty,
       removeKitItem,

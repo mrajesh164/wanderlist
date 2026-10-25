@@ -146,6 +146,20 @@ html[data-has-trips="no"] [data-when="returning"] {
   display: none;
 }
 
+/* Trips now come from Supabase over the network, so there is a moment where
+   neither face is known. An inline script used to settle this before first
+   paint by reading localStorage; it cannot, because the answer is no longer on
+   the device — and with accounts there are three states, not two: signed out,
+   signed in with nothing, signed in with trips.
+
+   So "loading" hides both faces rather than guessing. Showing a returning
+   person the first-visit screen for a frame is worse than showing them nothing
+   for one, and the provider replaces this the moment the fetch resolves. */
+html[data-has-trips="loading"] [data-when="first-visit"],
+html[data-has-trips="loading"] [data-when="returning"] {
+  display: none;
+}
+
 /* Respect a reduced-motion preference for the one transition we use. */
 @media (prefers-reduced-motion: reduce) {
   *,
