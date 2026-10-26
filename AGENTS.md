@@ -232,9 +232,20 @@ person's `user_id`. That omission is exactly what `/security-review` should catc
 so don't make it by accident.
 
 `climate_cache` is the deliberate contrast: readable by any authenticated user,
-writable by none. Only the server, holding the service role, fills it. Two tables
-fenced per-user and one shared read-only table is a much easier thing to explain
-than three identical policies.
+writable by none. Only the server, holding the service role, fills it — see
+`lib/supabase-admin.ts`, which is the single place that key is used and carries
+`import "server-only"` so a client import fails the build rather than shipping
+it. Two tables fenced per-user and one shared read-only table is a much easier
+thing to explain than three identical policies.
+
+**This was briefly built the other way, and `/security-review` caught it.** The
+first version let any signed-in user insert, on the reasoning that a
+service-role key in the environment was the worse risk. It wasn't: a check
+constraint bounding the values didn't help, because a plausible-but-wrong row
+(Lisbon in March at −20 °C, with an attacker-chosen label) still passed, and
+with no update or delete policy it would have stayed. Writes are now refused by
+an explicit `with check (false)` rather than a missing policy, so the refusal is
+visible to anyone reading `pg_policies` instead of looking like an oversight.
 
 ### What the port breaks
 

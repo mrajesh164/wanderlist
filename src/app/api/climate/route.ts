@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseForRequest } from "@/lib/supabase-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   ClimateUnavailable,
   fetchNormals,
@@ -109,19 +110,28 @@ export async function GET(request: Request) {
     throw cause;
   }
 
-  /* A failed write is not a failed request. The numbers are already in hand,
+  /* The write goes through the service role, not the caller's token. Clients
+     cannot write this table at all — `/security-review` found that letting them
+     meant any account holder could change what every other account holder is
+     told to pack, permanently. See lib/supabase-admin.ts.
+
+     A failed write is not a failed request. The numbers are already in hand,
      and the only cost of not caching them is doing the work again — so the
-     caller gets their answer either way. Losing the insert to a race with
-     another user asking for the same city is the expected case, not an error. */
-  const written = await supabase.from("climate_cache").insert({
-    place_key: key,
-    month,
-    high_c: normals.highC,
-    low_c: normals.lowC,
-    rain_days: normals.rainDays,
-    sample_years: normals.sampleYears,
-    label: resolved.label,
-  });
+     caller gets their answer either way. Two cases are expected rather than
+     exceptional: losing a race to another user asking for the same city, and
+     the service key not being configured at all, which simply means no cache. */
+  const admin = supabaseAdmin();
+  const written = admin
+    ? await admin.from("climate_cache").insert({
+        place_key: key,
+        month,
+        high_c: normals.highC,
+        low_c: normals.lowC,
+        rain_days: normals.rainDays,
+        sample_years: normals.sampleYears,
+        label: resolved.label,
+      })
+    : null;
 
   return NextResponse.json({
     source: "api",
@@ -129,6 +139,6 @@ export async function GET(request: Request) {
     placeKey: key,
     month,
     ...normals,
-    cached: written.error === null,
+    cached: written !== null && written.error === null,
   });
 }
