@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { toF } from "@/lib/climate";
 /* Type-only, so this client component doesn't pull the fetching module into
    the browser bundle — the import is erased at compile time. */
@@ -5,8 +6,8 @@ import type { DayNormal } from "@/lib/open-meteo";
 import { Badge } from "./Card";
 
 /**
- * A row of day cells — one per day of the trip, with what that date is usually
- * like.
+ * A grid of day cells — one per day of the trip, with what that date is usually
+ * like, wrapped into rows of at most a week.
  *
  * This replaces a sentence about the month with the days you're actually going.
  * "Cold, 31–44°F, some rain" is true of December in New York and tells you
@@ -117,6 +118,28 @@ export type TripDay = {
   normal: DayNormal;
 };
 
+/**
+ * How many cells go in a row.
+ *
+ * The strip used to scroll sideways, which meant a two-week trip hid half its
+ * days off the right edge — the days furthest away, which are exactly the ones
+ * you're least sure about. It wraps now.
+ *
+ * Rows are *balanced* rather than filled to the maximum: nine days go 5 + 4, not
+ * 7 + 2. A row of two cells stranded under a row of seven reads as a mistake,
+ * and nothing here is weekday-aligned, so there's no calendar meaning to a row
+ * of exactly seven that would be worth the ragged edge. Seven is only a ceiling,
+ * picked because it's a week's worth and about as many cells as stay legible
+ * across a page.
+ */
+const COLS_WIDE = 7;
+/** Narrow screens take four, below which the temperatures start to crowd. */
+const COLS_NARROW = 4;
+
+function balancedColumns(count: number, max: number): number {
+  return Math.ceil(count / Math.ceil(count / max));
+}
+
 export function ConditionsStrip({
   days,
   sampleYears,
@@ -145,10 +168,19 @@ export function ConditionsStrip({
         </h2>
       </div>
 
-      {/* Scrolls rather than wraps: a fortnight shouldn't reflow into a block
-          that reads like a table. Hairline rules between cells, no fills —
-          Café Terrace is a printed document, not a weather app. */}
-      <ol className="mt-2 flex overflow-x-auto border border-rule bg-surface">
+      {/* The grid draws only its top and left edge; every cell draws its own
+          right and bottom. That way the outer rule is never doubled, and a
+          part-filled last row closes itself off and leaves the remainder as
+          blank page rather than an empty box waiting to be filled. */}
+      <ol
+        className="mt-2 grid grid-cols-[repeat(var(--day-cols-narrow),minmax(0,1fr))] border-t border-l border-rule sm:grid-cols-[repeat(var(--day-cols),minmax(0,1fr))]"
+        style={
+          {
+            "--day-cols": balancedColumns(days.length, COLS_WIDE),
+            "--day-cols-narrow": balancedColumns(days.length, COLS_NARROW),
+          } as CSSProperties
+        }
+      >
         {days.map(({ date, normal }) => {
           const kind = weatherFor(normal);
           const style = WEATHER_STYLE[kind];
@@ -157,7 +189,7 @@ export function ConditionsStrip({
               key={date.toISOString()}
               /* gap-2 and py-3 keep to the 4px scale the design system
                  specifies — gap-1.5 would be 6px, which isn't on it. */
-              className="flex min-w-18 flex-1 flex-col items-center gap-2 border-r border-rule px-2 py-3 last:border-r-0"
+              className="flex flex-col items-center gap-2 border-r border-b border-rule px-2 py-3"
               style={{ backgroundColor: style.tint }}
             >
               {/* Weekday and date on ONE line, in label type.
