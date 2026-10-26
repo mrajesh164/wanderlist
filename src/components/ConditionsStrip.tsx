@@ -70,12 +70,18 @@ export type Weather = "sun" | "cloud" | "rain" | "snow";
  *
  * Thresholds are deliberately coarse. The underlying figure is "4 of the last
  * 15 December 10ths were wet", and pretending that supports finer gradations
- * than wet / unsettled / dry would be false precision. Snow wins over rain
- * when the low is at or below freezing, because that's the call that changes
- * what goes in the bag.
+ * than wet / unsettled / dry would be false precision.
+ *
+ * Snow is judged on the **mean of high and low**, not the low alone. The first
+ * version used `lowC <= 0` and painted five snowflakes across a mid-December
+ * week in New York, which is plainly wrong — the lows there sit a degree below
+ * freezing while the highs are 6–8°C, so precipitation almost always arrives as
+ * rain. The overnight minimum says nothing about the temperature when it
+ * actually fell; the day's midpoint is a far better proxy.
  */
 export function weatherFor(day: DayNormal): Weather {
-  if (day.wetChance >= 0.3 && day.lowC <= 0) return "snow";
+  const mean = (day.highC + day.lowC) / 2;
+  if (day.wetChance >= 0.3 && mean <= 1) return "snow";
   if (day.wetChance >= 0.4) return "rain";
   if (day.wetChance >= 0.2) return "cloud";
   return "sun";
@@ -85,7 +91,24 @@ const WEATHER_LABEL: Record<Weather, string> = {
   sun: "mostly dry",
   cloud: "some chance of rain",
   rain: "often wet",
-  snow: "often wet, and freezing",
+  snow: "often wet, and cold enough to snow",
+};
+
+/**
+ * A pigment per kind of day, in the same spirit as `categoryStyle.ts`: a
+ * limited ink set a printed chart would plausibly have had, kept well away from
+ * the accent, which belongs to the primary action alone.
+ *
+ * `hue` draws the glyph, `tint` washes the cell — so the strip can be read at a
+ * glance without anyone parsing percentages. The tints are deliberately faint;
+ * nine saturated cells in a row would be the fruit salad the category comment
+ * warns about.
+ */
+const WEATHER_STYLE: Record<Weather, { hue: string; tint: string }> = {
+  sun: { hue: "#8A6A1E", tint: "#F3EAD1" },
+  cloud: { hue: "#595F69", tint: "#E6E7EA" },
+  rain: { hue: "#2F5570", tint: "#DCE4EC" },
+  snow: { hue: "#4A6E7A", tint: "#DFEAEE" },
 };
 
 export type TripDay = {
@@ -124,10 +147,12 @@ export function ConditionsStrip({
       <ol className="mt-2 flex overflow-x-auto border border-rule bg-surface">
         {days.map(({ date, normal }) => {
           const kind = weatherFor(normal);
+          const style = WEATHER_STYLE[kind];
           return (
             <li
               key={date.toISOString()}
               className="flex min-w-16 flex-1 flex-col items-center gap-1 border-r border-rule px-2 py-2.5 last:border-r-0"
+              style={{ backgroundColor: style.tint }}
             >
               <span className="font-sans text-label uppercase text-muted">
                 {date.toLocaleDateString(undefined, { weekday: "short" })}
@@ -135,7 +160,9 @@ export function ConditionsStrip({
               <span className="font-sans text-small tabular-nums text-ink">
                 {date.getDate()}
               </span>
-              <span className="text-ink" title={WEATHER_LABEL[kind]}>
+              {/* The glyph carries the colour; the numbers stay in ink so they
+                  remain the most legible thing in the cell. */}
+              <span style={{ color: style.hue }} title={WEATHER_LABEL[kind]}>
                 <Glyph kind={kind} />
                 <span className="sr-only">{WEATHER_LABEL[kind]}</span>
               </span>
