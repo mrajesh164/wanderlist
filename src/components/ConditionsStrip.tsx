@@ -132,9 +132,13 @@ export function ConditionsStrip({
     <section className="mt-3" aria-labelledby="conditions-strip-heading">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <Badge>Usually</Badge>
+        {/* The legend lives here, once, rather than as HI/LO on every cell.
+            Said in the header it costs five words total; said per cell it costs
+            four characters of chrome nine times over. */}
         <h2 id="conditions-strip-heading" className="text-small text-muted">
           What these dates are typically like in {place.split(",")[0]}, averaged
-          from {sampleYears} years.{" "}
+          from {sampleYears} years — <strong className="text-ink">daytime high</strong>{" "}
+          and overnight low.{" "}
           <a href="https://open-meteo.com" rel="noreferrer noopener">
             Open-Meteo
           </a>
@@ -151,26 +155,43 @@ export function ConditionsStrip({
           return (
             <li
               key={date.toISOString()}
-              className="flex min-w-16 flex-1 flex-col items-center gap-1 border-r border-rule px-2 py-2.5 last:border-r-0"
+              /* gap-2 and py-3 keep to the 4px scale the design system
+                 specifies — gap-1.5 would be 6px, which isn't on it. */
+              className="flex min-w-18 flex-1 flex-col items-center gap-2 border-r border-rule px-2 py-3 last:border-r-0"
               style={{ backgroundColor: style.tint }}
             >
-              <span className="font-sans text-label uppercase text-muted">
-                {date.toLocaleDateString(undefined, { weekday: "short" })}
-              </span>
-              <span className="font-sans text-small tabular-nums text-ink">
+              {/* Weekday and date on ONE line, in label type.
+
+                  They were two lines before, which left a bare "10" sitting in
+                  the same size and colour as the temperatures below it — three
+                  numbers in one visual register, and no way to tell which was a
+                  date. Uppercase letterspaced type is the one style in Café
+                  Terrace that unmistakably isn't a measurement. */}
+              <span className="font-sans text-label uppercase tracking-[0.14em] text-muted">
+                {date.toLocaleDateString(undefined, { weekday: "short" })}{" "}
                 {date.getDate()}
               </span>
-              {/* The glyph carries the colour; the numbers stay in ink so they
-                  remain the most legible thing in the cell. */}
+
               <span style={{ color: style.hue }} title={WEATHER_LABEL[kind]}>
                 <Glyph kind={kind} />
                 <span className="sr-only">{WEATHER_LABEL[kind]}</span>
               </span>
-              <span className="font-sans text-small tabular-nums text-ink">
-                {toF(normal.highC)}°
-              </span>
-              <span className="font-sans text-small tabular-nums text-muted">
-                {toF(normal.lowC)}°
+
+              {/* High and low, baseline-aligned with a clear size step.
+
+                  Size is what names them: the larger figure is the day, the
+                  smaller the night. Stacked at equal size, "46" over "34" only
+                  said "two numbers, one above the other" — the reader had to
+                  infer the relationship. Labelling them HI and LO would be the
+                  obvious fix and the wrong one; it adds four characters of
+                  chrome per cell to say what a size step already says. */}
+              <span className="flex items-baseline gap-1">
+                <span className="font-sans text-body font-semibold tabular-nums text-ink">
+                  {toF(normal.highC)}°
+                </span>
+                <span className="font-sans text-label tabular-nums text-muted">
+                  {toF(normal.lowC)}°
+                </span>
               </span>
             </li>
           );
