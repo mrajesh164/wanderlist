@@ -29,9 +29,22 @@ function NewTrip() {
   const from = params.get("from");
   const repeatOf = from ? trips.find((t) => t.id === from) : undefined;
 
-  // Wait for storage before deciding there's nothing to repeat, or a reload on
-  // /trips/new?from=… would quietly turn into a blank new trip.
-  if (from && !ready) return <Heading repeating />;
+  /**
+   * Wait for the first load before showing the form at all.
+   *
+   * This used to be `if (from && !ready)` — guarding only the repeat case, so a
+   * reload of `?from=…` couldn't quietly become a blank new trip. The Playwright
+   * test found the hole in that: the form rendered while the Supabase client was
+   * still being built, so a trip submitted in that window was dropped. `addTrip`
+   * wrote it optimistically, `write()` found no client and returned silently,
+   * and the in-flight initial fetch then replaced local state — so the trip
+   * vanished from the screen *and* never reached the database. "That trip isn't
+   * here" was the result.
+   *
+   * Guarding unconditionally matches what `/trips/[id]` and `/inventory` already
+   * do, and costs only a placeholder on a cold load.
+   */
+  if (!ready) return <Heading repeating={Boolean(from)} />;
 
   return (
     <>

@@ -219,7 +219,16 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
    */
   const write = useCallback(
     async (fn: (db: SupabaseClient, uid: string) => Promise<void>) => {
-      if (!supabase || !userId) return;
+      /* Never silently. This returned bare `return` and that cost an hour: a
+         mutation fired before the client existed was dropped without a trace,
+         the optimistic row was then wiped by the in-flight initial fetch, and
+         the person was left looking at "That trip isn't here" with nothing
+         saved. Callers are gated on `ready` so this should be unreachable —
+         which is exactly why it must say so if it ever isn't. */
+      if (!supabase || !userId) {
+        setError("Not signed in yet — that change wasn't saved. Try again.");
+        return;
+      }
       try {
         await fn(supabase, userId);
         setError(null);
