@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useTrips } from "@/app/providers";
 import { Button, ButtonLink } from "@/components/Button";
-import { Badge, Card, Label } from "@/components/Card";
+import { Card, Label } from "@/components/Card";
 import { CategorySection } from "@/components/CategorySection";
 import { AddItemForm } from "@/components/AddItemForm";
 import { Checkbox } from "@/components/Field";
@@ -197,18 +197,6 @@ function Checklist() {
         />
       )}
 
-      {/* An opened example says so, permanently, so it can never be mistaken
-          for a trip the person created. */}
-      {trip.isExample && (
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-l-2 border-warning bg-surface px-4 py-3">
-          <p className="measure text-small text-ink">
-            <strong>This is the example.</strong> It&apos;s been packed twice, so
-            the list already reflects what those trips taught it. Try
-            &ldquo;Pack this again&rdquo; from Previous — or delete it below.
-          </p>
-          <Badge tone="warning">Example</Badge>
-        </div>
-      )}
 
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <Label>{countdownLabel(trip)}</Label>

@@ -60,16 +60,32 @@ A trip (`/trips/[id]`) and its review belong to the Upcoming tab, since that's
 where you came from.
 
 **The first visit lives in `components/StarterTrips.tsx`**, rendered by both `/`
-and `/trips` so neither entry point can dead-end. It carries
-`components/WorkedExample.tsx` — a trip already packed twice, with its
-corrections shown inline. That exists because the correction loop is the only
-thing this tool does that a notes app doesn't, and it's the one thing a first
-visit can't otherwise show: it takes two trips to happen. The example is built
-by `lib/example.ts`, flagged `isExample`, badged wherever it appears, and
-deletable like any other trip. The `data-when` CSS gate (see
-`globals.css`) now applies to home. `components/ResetFirstVisit.tsx` in the
-footer exists because otherwise the onboarding becomes unreachable the moment it
-succeeds — there's no other way to see it again on the same device.
+and `/trips` so neither entry point can dead-end. The `data-when` CSS gate (see
+`globals.css`) applies to home. `components/ResetFirstVisit.tsx` in the footer
+exists because otherwise the onboarding becomes unreachable the moment it
+succeeds — there's no other way to see it again.
+
+**The worked example is gone.** Assignment 3 carried a
+`components/WorkedExample.tsx` — a trip already packed twice with its
+corrections shown inline — on the argument that the correction loop takes two
+trips to demonstrate and a first visit can't otherwise show it. It was removed
+in Assignment 4 as a product decision, and the removal took `lib/example.ts`,
+the `isExample` flag and its badges with it. Don't reintroduce any of them
+without asking: a boolean nothing writes is a question waiting to be asked in a
+code review.
+
+It also had the bug the starter cards had — `addTrip` then navigate, which
+signed out meant arriving after sign-up at a trip that was never saved. If
+anything like it comes back, it has to be a link, not a mutation. See
+**Signed-out visitors** below.
+
+**Signed-out visitors can pick a starter without losing it.** `adopt()` writes a
+row, so signed out the cards link to `/trips/new?starter=<key>` instead and the
+form opens pre-filled from `lib/starters.ts`. The middleware carries the query
+through the sign-in redirect, so the trip they chose is waiting rather than
+lost. Signed in, a card still builds the list on the spot. The gate is
+`isSignedIn === true` so the moment before Clerk resolves takes the link, which
+works either way.
 
 **Adding an item does three things at once** (`addItem` in `providers.tsx`): it
 joins the trip, joins `learned.add` so the next run of that trip starts with it,

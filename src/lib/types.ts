@@ -85,12 +85,6 @@ export type Trip = {
   completedAt?: string;
   review?: TripReview;
   /**
-   * True only for the worked example offered on the first visit. It's real data
-   * in every other respect — it just gets labelled so nobody mistakes it for
-   * something they created, and so it can be removed in one action.
-   */
-  isExample?: boolean;
-  /**
    * Corrections carried forward from every past run of this trip. This is the
    * "it remembers" part: pack it again and the list starts already fixed.
    */

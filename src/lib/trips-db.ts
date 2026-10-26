@@ -25,7 +25,6 @@ type TripRow = {
   items: Item[] | null;
   learned: { drop: string[]; add: string[] } | null;
   review: TripReview | null;
-  is_example: boolean;
   completed_at: string | null;
   created_at: string;
 };
@@ -53,7 +52,6 @@ function toTrip(row: TripRow): Trip {
     createdAt: row.created_at,
     completedAt: row.completed_at ?? undefined,
     review: row.review ?? undefined,
-    isExample: row.is_example || undefined,
     /* Normalised so callers can rely on it, the same guarantee readState used
        to give. */
     learned: {
@@ -78,7 +76,6 @@ function toTripPayload(trip: Trip, userId: string) {
     items: trip.items,
     learned: trip.learned,
     review: trip.review ?? null,
-    is_example: trip.isExample ?? false,
     completed_at: trip.completedAt ?? null,
   };
 }
