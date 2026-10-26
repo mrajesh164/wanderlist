@@ -29,7 +29,13 @@ the phone beside the suitcase.
 
 ```mermaid
 flowchart TD
-    Start([Opens the app]) --> Has{Anything saved?}
+    Start([Opens the app]) --> Signed{Signed in?}
+
+    Signed -->|"No"| Door["Home — public<br/>three ready-made trips, or plan your own"]
+    Door -->|"picks one"| Gate["/sign-in · /sign-up<br/>the choice is carried through, not lost"]
+    Gate --> Has
+
+    Signed -->|Yes| Has{Anything saved?}
 
     Has -->|"No — first visit"| First["First visit<br/>three ready-made trips, or plan your own"]
     First -->|taps a starter| Build
