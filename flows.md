@@ -13,7 +13,13 @@ The core task, as one sentence:
 
 ```mermaid
 flowchart TD
-    Start([Opens the app]) --> Has{Anything saved?}
+    Start([Opens the app]) --> Signed{Signed in?}
+
+    Signed -->|"No"| Door["Home — public<br/>three ready-made trips, or plan your own"]
+    Door -->|"picks one"| Gate["/sign-in · /sign-up<br/>the choice is carried through, not lost"]
+    Gate --> Has
+
+    Signed -->|Yes| Has{Anything saved?}
 
     Has -->|"No — first visit"| First["First visit<br/>three ready-made trips, or plan your own"]
     First -->|taps a starter| Build
@@ -43,12 +49,23 @@ ready-made trips, or plan your own. One tap on a starter creates a real trip, wi
 dates and a real packing list you can change afterwards. Value arrives before a single
 field is filled in.
 
+Home stays public for that reason: a sign-in wall in front of the onboarding would be the
+dead end with a form on it. It shows nothing personal. A signed-out visitor who picks a
+starter is taken to `/trips/new?starter=<key>` rather than having a trip written for them,
+and the query survives the sign-in redirect — so what they chose is waiting afterwards
+instead of lost. Signed in, the same card builds the list on the spot.
+
 **Coming back** has three reasons on three different clocks. Mid-pack, because packing
 happens over several evenings and a part-packed list is an invitation to finish it. Before
 the trip, because home and Upcoming both lead with the next departure and what's still
 unpacked.
 After it, because a short review feeds `trip.learned`, and the next run of that trip
 starts already corrected.
+
+Coming back now also means coming back *somewhere else*. Everything is per account in
+Postgres rather than per browser, so a list planned on a laptop over several evenings is
+the same list on the phone beside the suitcase — which is the whole reason accounts are
+worth their cost here.
 
 That dashed arrow is the whole idea of the tool: a trip you repeat should cost less to
 pack the second time than the first.
@@ -97,11 +114,17 @@ the list has converged on what you actually pack.
 
 ## How the list gets built
 
-No forecast is fetched — the brief rules out external APIs, and there is no network call
-anywhere in this app. `src/lib/climate.ts` ships approximate monthly normals for 33
-destinations instead, which turns out to suit the problem better: a trip you repeat is
-usually planned well past any forecast horizon, so the real question is "what is March
-usually like in Lisbon", not "what is the weather on the 14th".
+No forecast is fetched, and that's the right call rather than a limitation: a trip you
+repeat is usually planned well past any forecast horizon, so the real question is "what is
+March usually like in Lisbon", not "what is the weather on the 14th".
+
+The numbers come from Open-Meteo's archive — fifteen years of that month, averaged per
+calendar date — fetched on the server at `/api/climate` and cached in `climate_cache`,
+because normals for March in Lisbon are identical for every user and the free tier
+rate-limits per IP. Each day of the trip gets a cell: weekday, a glyph, the daytime high
+and the overnight low. `src/lib/climate.ts` still ships approximate monthly normals for 33
+destinations, now as the fallback for when the lookup can't answer rather than as the only
+source.
 
 From there `buildPackingList` in `src/lib/suggestions.ts` combines three inputs:
 

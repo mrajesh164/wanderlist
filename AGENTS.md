@@ -169,6 +169,50 @@ destination, or when the image fails to load. The poster is drawn *from the
 climate data* — sun height, palette and rain density all come from the month's
 conditions — so an unknown destination still gets a picture that means something.
 
+## The day strip
+
+The visible half of the API, and the part most likely to be "improved" by
+someone who doesn't know why it looks like this. Four files:
+`lib/use-climate.ts` fetches, `lib/trip-days.ts` turns a date range into days,
+`components/ConditionsNote.tsx` owns the four states and the one-line summary,
+and `components/ConditionsStrip.tsx` draws the cells.
+
+It replaced a sentence. "Cold, 31–44°F, some rain" is true of December in New
+York and says nothing about whether to pack for the 10th differently from the
+17th; the strip shows the shape of the actual dates, which is what you pack
+from. The sentence survives as a one-line summary above it, because the band
+and wetness it names are what the list was generated from.
+
+Rules worth keeping:
+
+- **Three registers in a cell, and size is what names them.** Weekday and date
+  on one line in label type (uppercase, letterspaced — the one style in Café
+  Terrace that unmistakably isn't a measurement), then the glyph, then the high
+  in body semibold beside the low in label muted. An earlier version stacked a
+  bare "10" above "46" above "34" in one size, which read as three numbers with
+  no way to tell which was a date. Labelling them HI and LO is the obvious fix
+  and the wrong one: four characters of chrome per cell to say what a size step
+  already says.
+- **Snow is judged on the mean of high and low**, not the low alone.
+  `lowC <= 0` painted five snowflakes across a mid-December week in New York,
+  where lows sit a degree below freezing and highs are 6–8 °C, so precipitation
+  almost always arrives as rain.
+- **Thresholds stay coarse.** The underlying figure is "4 of the last 15
+  December 10ths were wet"; finer gradations than wet / unsettled / dry would be
+  false precision.
+- **Pigments, not a weather app's palette.** `WEATHER_STYLE` holds one hue and
+  one faint tint per kind of day, in the same spirit as `categoryStyle.ts` and
+  kept well away from the accent. Nine saturated cells in a row would be fruit
+  salad.
+- **Rows wrap; they don't scroll.** Balanced rather than filled — nine days go
+  5 + 4, not 7 + 2 — with seven a ceiling (four on narrow screens). A strip you
+  have to drag hides the days furthest out, which are the ones you're least sure
+  how to pack for. The grid draws its top and left edge and every cell draws its
+  own right and bottom, so the outer rule is never doubled and a part-filled last
+  row closes itself off.
+- **The glyphs are hand-written SVG paths**, because there is no icon package
+  and there isn't going to be one.
+
 ## Data model
 
 Three tables. Two hold one person's data and are fenced by row-level security;
@@ -296,11 +340,15 @@ easier to lose than the code:
 - **Ids stay client-generated**, which is the one place the plan changed: it
   keeps `addTrip` synchronous for callers and lets an optimistic row carry its
   final id instead of swapping a placeholder when the insert returns.
-- **Seeding the worked example** (`is_example`) is the one piece **still
-  outstanding**. It used to be built on first paint from `lib/example.ts`; with
-  accounts it belongs at first sign-in, server-side. Until then a brand-new
-  account sees the starter trips but not the worked example, so the correction
-  loop goes unillustrated — which was the whole reason that component exists.
+- **Seeding the worked example** was the fourth, and it was **answered by
+  deleting the feature** rather than by building it. The plan was to move the
+  seed from first paint to first sign-in, server-side; instead the example went
+  (see **The worked example is gone** above), which removed the question. A
+  brand-new account therefore sees the starter trips and no worked example, and
+  the correction loop is explained in words rather than demonstrated. That is a
+  real cost, accepted knowingly: it was a fourth thing competing for the first
+  screen, and signed out it walked people into a trip that had never been
+  saved.
 
 ## Hard constraints
 
@@ -308,9 +356,9 @@ These come from the assignment brief. Do not violate them, and push back if aske
 
 **Assignment 4 reversed the first two constraints of Assignment 3.** The old rules
 said no external APIs, no database and no accounts; the brief now requires all
-three. The notes below are the current rules. Where this file still describes
-`localStorage` as "the entire backend", that is Assignment 3's architecture,
-which is being replaced — see **Data model** above.
+three, and all three are built. The notes below are the current rules. Anywhere
+this file mentions `localStorage`, it is describing what Assignment 3 did and
+what replaced it — never current behaviour.
 
 - **Accounts are required.** Clerk, on **development keys only**; production keys
   need a domain we don't own. A signed-out visitor must reach nobody's data.
@@ -523,9 +571,16 @@ Assignment 3's requirements still hold — the UI/UX work is not superseded:
 
 ## Conventions
 
-- `src/lib/` is pure logic with no React: `climate.ts`, `suggestions.ts`,
-  `trips.ts`, `inventory.ts`, `open-meteo.ts`, `trips-db.ts`. Keep it testable by
-  reading. (`storage.ts` is gone — localStorage was Assignment 3's backend.)
+- `src/lib/` is pure logic with no React, and keeping it readable is the point:
+  `climate.ts`, `suggestions.ts`, `trips.ts`, `inventory.ts`, `starters.ts`,
+  `photos.ts`, `types.ts`, `open-meteo.ts`, `trip-days.ts`, `trips-db.ts`, plus
+  the three Supabase clients below. (`storage.ts` and `example.ts` are gone —
+  localStorage was Assignment 3's backend, and the example was removed.)
+  **`use-climate.ts` is the one exception** and it is named so nobody has to
+  discover it: it holds `useClimate`/`useTripClimate`, which are hooks. It sits
+  here because it is the companion to `open-meteo.ts` and reads as one subject
+  with it. If a second React file ever wants in, move this one to
+  `src/components/` instead of widening the rule.
 - Three Supabase clients, and the distinction is the access-control story:
   `lib/supabase.ts` (browser, caller's Clerk token), `lib/supabase-server.ts`
   (route handlers, also the caller's token), and `lib/supabase-admin.ts` (service
