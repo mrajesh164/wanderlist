@@ -51,6 +51,13 @@ export function ConditionsNote({
       </div>
 
       {live?.state === "ok" ? (
+        /* "Averaged from 15 years of recorded weather" does the work the old
+           "not a forecast" disclaimer used to do, and does it better — it says
+           what the number *is* rather than what it isn't. Whether the row came
+           from the cache or the API is a developer's concern, not a
+           traveller's; it stays in the route's JSON for debugging.
+
+           The attribution is not optional: Open-Meteo's data is CC BY 4.0. */
         <p className="measure mt-1.5 text-small text-muted">
           Averaged from {live.sampleYears} years of recorded weather:{" "}
           <strong className="text-ink">
@@ -60,18 +67,12 @@ export function ConditionsNote({
           <strong className="text-ink">
             {live.lowC}°C / {toF(live.lowC)}°F
           </strong>
-          , and {live.rainDays} days of rain in a typical {month}. Not a
-          forecast — check that closer to your trip.{" "}
-          <span className="text-ink-faint">
-            {live.source === "cache"
-              ? "From this app's cache."
-              : "Fetched just now."}{" "}
-            Weather data by{" "}
-            <a href="https://open-meteo.com" rel="noreferrer noopener">
-              Open-Meteo.com
-            </a>
-            .
-          </span>
+          , and {live.rainDays} days of rain in a typical {month}. Weather data
+          by{" "}
+          <a href="https://open-meteo.com" rel="noreferrer noopener">
+            Open-Meteo.com
+          </a>
+          .
         </p>
       ) : live?.state === "loading" ? (
         <p className="measure mt-1.5 text-small text-muted">
