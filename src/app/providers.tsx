@@ -90,15 +90,38 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
   const { user, isLoaded: userLoaded } = useUser();
   const userId = user?.id ?? null;
 
-  const [state, setState] = useState<Snapshot>(EMPTY);
+  /**
+   * The snapshot is stamped with whose it is.
+   *
+   * Signing out and back in does **not** remount this provider: Clerk performs
+   * a soft client-side navigation and a `router.refresh()`, which re-fetches
+   * server components without unmounting client ones, and this provider sits
+   * in the root layout with no key. So without the stamp, rows fetched for one
+   * account stay in state across an identity change, and the next person to
+   * sign in on the same browser is shown the previous person's trips until
+   * their own fetch resolves — names, destinations and pack counts included.
+   *
+   * It has to be checked at render rather than cleared in an effect: effects
+   * run after paint, so a cleanup would still let one frame of the wrong
+   * account's data reach the screen.
+   */
+  const [snapshot, setSnapshot] = useState<{
+    uid: string | null;
+    data: Snapshot;
+  }>({ uid: null, data: EMPTY });
   /** True once a fetch has resolved. Only ever set after an await. */
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(supabaseConfigError);
 
+  /** Do the rows in hand belong to whoever is signed in right now? */
+  const mine = userId !== null && snapshot.uid === userId;
+
   /* Derived rather than stored. Signed out there is nothing to wait for, so
      "ready" is immediate — and deriving it means the effect below never has to
-     setState synchronously, which React rightly objects to. */
-  const ready = userLoaded && (!supabase || loaded);
+     setState synchronously, which React rightly objects to. Across an identity
+     change `mine` is false, so this goes back to false and the routes show
+     their placeholders rather than somebody else's list. */
+  const ready = userLoaded && (!supabase || (loaded && mine));
 
   /* Mutations need the current snapshot to compute the next one *and* the
      resulting value to send to the database. A functional setState gives the
@@ -106,10 +129,15 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
      change goes through `apply`. */
   const stateRef = useRef<Snapshot>(EMPTY);
 
-  const apply = useCallback((next: Snapshot) => {
-    stateRef.current = next;
-    setState(next);
-  }, []);
+  /* Stamped here too, so an optimistic write can never carry one account's
+     rows into another's. */
+  const apply = useCallback(
+    (next: Snapshot) => {
+      stateRef.current = next;
+      setSnapshot({ uid: userId, data: next });
+    },
+    [userId],
+  );
 
   /** Refetch after a refused write. Not used for the initial load — see below. */
   const reload = useCallback(async () => {
@@ -163,12 +191,12 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
   /* Memoised because the `[]` branch would otherwise be a fresh array on every
      render, busting the context value's memo and re-rendering every consumer. */
   const trips = useMemo(
-    () => (supabase ? state.trips : []),
-    [supabase, state.trips],
+    () => (supabase && mine ? snapshot.data.trips : []),
+    [supabase, mine, snapshot.data.trips],
   );
   const kit = useMemo(
-    () => (supabase ? state.kit : []),
-    [supabase, state.kit],
+    () => (supabase && mine ? snapshot.data.kit : []),
+    [supabase, mine, snapshot.data.kit],
   );
 
   /**
