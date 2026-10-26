@@ -16,8 +16,9 @@ Packing lists for your favorite destinations. You keep the trips you take again 
 the last time you took it, and already adjusted for how long you're going and what
 the weather does there that month.
 
-Course: Design, Build, Ship · MPCS 51238 · Assignment 3 (Patterns & Flows).
-Due Tuesday, October 20 2026, 5:30 PM.
+Course: Design, Build, Ship · MPCS 51238 · Assignment 4 (Full Stack App).
+Due Tuesday, October 27 2026, 5:30 PM. Assignment 3's work is on `main`; this
+branch adds accounts, a database and one external API on top of it.
 
 ## The three flows
 
@@ -59,16 +60,32 @@ A trip (`/trips/[id]`) and its review belong to the Upcoming tab, since that's
 where you came from.
 
 **The first visit lives in `components/StarterTrips.tsx`**, rendered by both `/`
-and `/trips` so neither entry point can dead-end. It carries
-`components/WorkedExample.tsx` — a trip already packed twice, with its
-corrections shown inline. That exists because the correction loop is the only
-thing this tool does that a notes app doesn't, and it's the one thing a first
-visit can't otherwise show: it takes two trips to happen. The example is built
-by `lib/example.ts`, flagged `isExample`, badged wherever it appears, and
-deletable like any other trip. The `data-when` CSS gate (see
-`globals.css`) now applies to home. `components/ResetFirstVisit.tsx` in the
-footer exists because otherwise the onboarding becomes unreachable the moment it
-succeeds — there's no other way to see it again on the same device.
+and `/trips` so neither entry point can dead-end. The `data-when` CSS gate (see
+`globals.css`) applies to home. `components/ResetFirstVisit.tsx` in the footer
+exists because otherwise the onboarding becomes unreachable the moment it
+succeeds — there's no other way to see it again.
+
+**The worked example is gone.** Assignment 3 carried a
+`components/WorkedExample.tsx` — a trip already packed twice with its
+corrections shown inline — on the argument that the correction loop takes two
+trips to demonstrate and a first visit can't otherwise show it. It was removed
+in Assignment 4 as a product decision, and the removal took `lib/example.ts`,
+the `isExample` flag and its badges with it. Don't reintroduce any of them
+without asking: a boolean nothing writes is a question waiting to be asked in a
+code review.
+
+It also had the bug the starter cards had — `addTrip` then navigate, which
+signed out meant arriving after sign-up at a trip that was never saved. If
+anything like it comes back, it has to be a link, not a mutation. See
+**Signed-out visitors** below.
+
+**Signed-out visitors can pick a starter without losing it.** `adopt()` writes a
+row, so signed out the cards link to `/trips/new?starter=<key>` instead and the
+form opens pre-filled from `lib/starters.ts`. The middleware carries the query
+through the sign-in redirect, so the trip they chose is waiting rather than
+lost. Signed in, a card still builds the list on the spot. The gate is
+`isSignedIn === true` so the moment before Clerk resolves takes the link, which
+works either way.
 
 **Adding an item does three things at once** (`addItem` in `providers.tsx`): it
 joins the trip, joins `learned.add` so the next run of that trip starts with it,
@@ -152,17 +169,225 @@ destination, or when the image fails to load. The poster is drawn *from the
 climate data* — sun height, palette and rain density all come from the month's
 conditions — so an unknown destination still gets a picture that means something.
 
+## Data model
+
+Three tables. Two hold one person's data and are fenced by row-level security;
+one is shared reference data nobody owns. Read this before writing a migration.
+
+**Clerk user ids are strings, not UUIDs** (`user_2abc...`), so `user_id` is `text`.
+This is the single most likely thing to get wrong: with Supabase third-party auth,
+`auth.uid()` expects a Supabase UUID and will **not** work here. Every policy
+compares against the JWT's subject claim instead:
+
+```sql
+(auth.jwt() ->> 'sub') = user_id
+```
+
+### trips
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` pk, `gen_random_uuid()` | replaces `crypto.randomUUID()` |
+| `user_id` | `text not null` | Clerk `sub` |
+| `name` | `text not null` | "Thanksgiving at my parents'" |
+| `destination` | `text not null` | free text, shown on the board |
+| `climate_slug` | `text` | set when the destination matched the table |
+| `manual_band` / `manual_wetness` | `text` | set when it didn't |
+| `start_date` / `end_date` | `date not null` | were `"YYYY-MM-DD"` strings |
+| `items` | `jsonb not null default '[]'` | the checklist — see below |
+| `learned` | `jsonb not null default '{"drop":[],"add":[]}'` | corrections carried forward |
+| `review` | `jsonb` | `neverUsed`, `wishedFor`, `reviewedAt` |
+| `is_example` | `boolean not null default false` | **vestigial** — see below |
+| `completed_at` | `timestamptz` | set when the trip is finished |
+| `created_at` | `timestamptz not null default now()` | |
+
+**`is_example` is vestigial and deliberately left alone.** It flagged the one
+trip that was a demonstration rather than a real one, so it could be badged
+wherever it appeared. That feature was removed in Assignment 4, and the column
+stayed: nothing writes it, every row holds the default `false`, and dropping a
+column is a destructive migration with no benefit beyond tidiness. Don't write
+to it, don't read it, and don't let its presence imply the example is coming
+back.
+
+**Items stay as `jsonb` rather than becoming a fourth table.** The checklist is
+always read and written whole: no query filters, sorts or joins on a single item,
+and the inventory already aggregates them in JS (`buildInventory`). One row per
+trip also means one RLS check per trip instead of per item. The costs, accepted
+knowingly: no per-item access control (items are only ever reached through their
+trip, so there's nothing to protect separately), and no SQL aggregation across
+items. If a query ever needs to ask "which trips contain a sun hat", revisit this.
+
+### kit_items
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` pk, `gen_random_uuid()` | |
+| `user_id` | `text not null` | Clerk `sub` |
+| `label` | `text not null` | |
+| `category` | `text not null` | open-ended; see **Categories are open** |
+| `qty` | `integer` | **nullable on purpose** |
+| `added_at` | `timestamptz not null default now()` | |
+
+Add `unique (user_id, lower(label))`. `buildInventory` keys rows by lowercased
+label and assumes one row per label; Assignment 3 enforced that only in app code,
+and a constraint makes it real.
+
+`qty` being nullable is load-bearing, not laziness — null means nobody ever said
+how many, which the inventory treats differently from a number someone chose. See
+the quantity rules above; **do not add `default 1`.**
+
+### climate_cache
+
+Shared, derived, owned by nobody. Keyed by coordinates rounded to 0.1° and the
+month, holding the averaged normals plus how many years went into them and when
+it was fetched. No `user_id`.
+
+It exists because the free weather tier rate-limits per IP, and because normals
+for March in Lisbon are identical for every user on the planet — so one fetch
+should serve everybody. That is also the answer to "where do you call the API and
+why there": on the server, because the result is shared and caching it is the
+whole point.
+
+Measured, not assumed: a cold lookup is 15 sequential Open-Meteo requests at
+about 5.3s; the same lookup served from this table takes 741ms. Open-Meteo
+returned 429 after roughly ten calls from one shared IP, and their terms warn
+that platforms like Vercel are throttled early, so without the cache the second
+visitor to look up a city would be refused.
+
+### Row-level security
+
+Enable RLS on all three. For `trips` and `kit_items`, write all four policies —
+select, insert, update, delete — each `using ((auth.jwt() ->> 'sub') = user_id)`,
+and **insert and update also need `with check` on the same expression**. Without
+`with check`, `using` alone lets someone write a row stamped with another
+person's `user_id`. That omission is exactly what `/security-review` should catch,
+so don't make it by accident.
+
+`climate_cache` is the deliberate contrast: readable by any authenticated user,
+writable by none. Only the server, holding the service role, fills it — see
+`lib/supabase-admin.ts`, which is the single place that key is used and carries
+`import "server-only"` so a client import fails the build rather than shipping
+it. Two tables fenced per-user and one shared read-only table is a much easier
+thing to explain than three identical policies.
+
+**This was briefly built the other way, and `/security-review` caught it.** The
+first version let any signed-in user insert, on the reasoning that a
+service-role key in the environment was the worse risk. It wasn't: a check
+constraint bounding the values didn't help, because a plausible-but-wrong row
+(Lisbon in March at −20 °C, with an attacker-chosen label) still passed, and
+with no update or delete policy it would have stayed. Writes are now refused by
+an explicit `with check (false)` rather than a missing policy, so the refusal is
+visible to anyone reading `pg_policies` instead of looking like an oversight.
+
+### What the port broke
+
+Assignment 3's state layer did not survive. These needed designing rather than
+translating, and all four are **done** — recorded because the reasoning is
+easier to lose than the code:
+
+- **`HAS_TRIPS_SCRIPT` and `data-has-trips` died.** Replaced by the three-state
+  gate described under *Stack notes*. The client cannot know which of signed
+  out / signed in empty / signed in with trips applies before paint, so it
+  admits that rather than guessing.
+- **`readState` / `writeState` are gone** with `STORAGE_KEY` and
+  `LEGACY_STORAGE_KEY`. Writes are optimistic — a round trip per checkbox tick
+  would make packing feel broken — and a refused write sets `error` and
+  refetches so the screen converges on the database rather than drifting.
+- **Ids stay client-generated**, which is the one place the plan changed: it
+  keeps `addTrip` synchronous for callers and lets an optimistic row carry its
+  final id instead of swapping a placeholder when the insert returns.
+- **Seeding the worked example** (`is_example`) is the one piece **still
+  outstanding**. It used to be built on first paint from `lib/example.ts`; with
+  accounts it belongs at first sign-in, server-side. Until then a brand-new
+  account sees the starter trips but not the worked example, so the correction
+  loop goes unillustrated — which was the whole reason that component exists.
+
 ## Hard constraints
 
 These come from the assignment brief. Do not violate them, and push back if asked to.
 
-- **No external APIs.** None. Weather is a hardcoded climate table in
-  `src/lib/climate.ts`, not a fetch. There is no network call anywhere in this app.
-- **No database, no backend, no accounts, no auth.** All state is `localStorage`.
-- **No new packages** without asking first. Next.js + Tailwind is the whole stack.
-  No state library, no form library, no date library, no UI kit, no icon package.
-- Deployed on Vercel's free Hobby plan.
+**Assignment 4 reversed the first two constraints of Assignment 3.** The old rules
+said no external APIs, no database and no accounts; the brief now requires all
+three. The notes below are the current rules. Where this file still describes
+`localStorage` as "the entire backend", that is Assignment 3's architecture,
+which is being replaced — see **Data model** above.
+
+- **Accounts are required.** Clerk, on **development keys only**; production keys
+  need a domain we don't own. A signed-out visitor must reach nobody's data.
+- **Data lives in Supabase**, with row-level security on every table.
+- **Exactly one external API** does real work. More than one and none of them is
+  load-bearing, which muddies the "where do you call it, and why there" answer
+  the assignment grades. Nothing API-related is built until auth and the database
+  are standing — it's step 6 for a reason.
+- **Keys go in `.env.local`, never in the code or a commit.** `.claude/settings.json`
+  denies `Read`, `Edit` and `Write` on `**/.env*` — globbed, because the first
+  version used `./.env.*` and anchored the `./` to the session root rather than
+  the repo, so it silently guarded nothing. Do not add `Bash(cat:*)`, `head`,
+  `tail`, `grep` or `python3` to the allow list: those read `.env.local`
+  straight past the deny rule.
+- **No new packages** beyond what Clerk, Supabase and Playwright require, without
+  asking first. Still no state library, no form library, no date library, no UI
+  kit, no icon package.
+- Deployed on Vercel's free Hobby plan. Work on a branch; `main` holds the
+  Assignment 3 submission until the work is reviewed and merged.
 - `AGENTS.md` (this file) is the context file. There must be no `CLAUDE.md`.
+
+**What development keys cost, and what's done about it.** "Clerk, on development
+keys only" reads like a deployment convenience. It isn't — it's a security
+trade-off, and the second `/security-review` pass found the sharp edge. On an
+instance of type `development`, Clerk accepts the token identifying a *client*
+from the **query string** as well as from a cookie, and the only gate is
+`searchParams.has("__clerk_db_jwt")`: no signature check, no origin check. Proven
+against the running app rather than inferred — a document navigation to
+`/?__clerk_db_jwt=FORGED` was 307'd straight to
+`…clerk.accounts.dev/v1/client/handshake?…&__clerk_hs_reason=dev-browser-sync&__clerk_db_jwt=FORGED`,
+with the caller's token forwarded verbatim. With a *real* token — one an attacker
+reads out of their own cookie jar after signing up — the handshake returns that
+client's session cookies, the parameter is scrubbed from the URL, and the visitor
+is quietly operating inside the attacker's account. **Row-level security is no
+defence against this**, which is the part worth being able to say out loud: the
+policies enforce the identity they're given, and this attack hands them the wrong
+one. A fence below the auth layer cannot save you from a lie told above it.
+
+`src/proxy.ts` now strips any inbound `__clerk_db_jwt` query parameter before
+Clerk's middleware sees it and redirects to the clean URL. That is safe *here*
+because sign-in is embedded and same-origin; the parameter's legitimate job is
+carrying the token back from a hosted Account Portal on `*.accounts.dev`, which
+this app never uses. Don't move to Clerk's hosted pages without revisiting it,
+and don't extend the strip to `__clerk_handshake*` — the genuine handshake return
+needs those. Verified after the change by signing in through the real form with
+an emailed code, not just through `clerk.signIn()`. It does **not** make a
+development instance production-safe; only production keys do, and the brief
+forbids them.
+
+**Two things about the Clerk instance live in the dashboard, not in this repo,
+and both are visible to a classmate.** Read from the instance's own
+`/v1/environment` rather than guessed:
+
+- **Email is now a required attribute — fixed, and worth not undoing.** It used to
+  be optional, as were `username` and `password`, and with *nothing* required
+  Clerk's `<SignUp />` had no field it could collect: the sign-up card offered
+  only "Continue with Google", so anyone without a Google account could not create
+  one at all. Sign-*in* was unaffected, because email codes work for accounts that
+  already exist, which is exactly why it went unnoticed — the only way to find it
+  was to try signing up as a stranger. Now `email_address.required` is true and a
+  new account is created with an email and a code, verified end to end through the
+  real form. If the sign-up card ever shows nothing but social buttons again, this
+  setting is the first place to look.
+- `display_config.application_name` is still **"HW4"**, so the card reads "Sign in
+  to HW4".
+
+Neither is settable from the CLI (`clerk config pull`/`patch` don't carry them),
+so they can't be fixed from here.
+
+**Keep the walkthrough's status panel current.** `../assignment-4-walkthrough.html`
+(one level up, outside the repo) carries a **Where this stands** panel: one row
+per assignment step, with what is actually built. Update it when a step changes
+state — finished, started, or found to be wrong — and not otherwise. A commit is
+not a milestone; "sign-in works and signed-out is locked out" is. Roughly one
+edit per step, eight or so for the whole assignment. Don't narrate progress into
+it, and don't touch the checkboxes below it: those are the user's, stored in
+their browser, and overwriting them isn't possible from here anyway.
 
 ## Stack notes that actually bite
 
@@ -179,18 +404,18 @@ Next.js 16.4.2, React 19.3, Tailwind v4. Three things differ from older training
    `src/app/globals.css` with `@theme`. Add a color there and it becomes a utility
    (`--color-accent` → `bg-accent`, `text-accent`).
 
-3. **Reading `localStorage` naively causes a hydration mismatch or a flash.** A
-   returning user must never see the first-visit screen flicker past. The fix, from
-   `node_modules/next/dist/docs/01-app/02-guides/preventing-flash-before-hydration.md`:
-   an inline script in `<head>` sets `data-has-trips` on `<html>` during HTML parsing,
-   and the provider reads the *same* key so React's initial state agrees with the
-   DOM. Keep those two in sync — if you change the storage key, change it in both
-   places.
+3. **The first-visit gate has three states, not two.** A returning person must
+   never see the first-visit screen flicker past. Assignment 3 solved that with an
+   inline `<head>` script reading `localStorage` before first paint; that script
+   and `lib/storage.ts` are both **gone**, because the answer now comes from
+   Supabase over the network and cannot be known before paint — and because with
+   accounts there are three cases: signed out, signed in with nothing, signed in
+   with trips.
 
-   Keys are `wanderlist.*`. Each falls back to a `departure-board.*` predecessor
-   from before the rename and writes forward on first read, so nobody's saved
-   trips were orphaned — `LEGACY_STORAGE_KEY` in `lib/storage.ts`. The inline
-   script checks both names for the same reason.
+   `<html>` therefore ships `data-has-trips="loading"`, which `globals.css` uses to
+   hide *both* faces, and `TripsProvider` rewrites it to `yes`/`no` once the fetch
+   resolves. A frame of nothing beats a frame of the wrong screen. If you add a
+   fourth state, the CSS gate and that effect must change together.
 
 4. **Hand-written CSS must go in `@layer base`.** Tailwind v4 emits utilities
    inside a cascade layer, and unlayered rules beat layered ones regardless of
@@ -258,7 +483,26 @@ an icon and a tint — **never an accent-coloured button**.
 
 ## Requirements this app is graded on
 
-Keep these true as the code changes:
+Assignment 4 adds these, and they are the ones that decide the grade:
+
+- **Accounts:** sign up, sign in, sign out with Clerk. A signed-out visitor sees
+  nobody's data — check it signed out, don't assume it.
+- **Data in Supabase**, row-level security on every table, each person seeing only
+  their own rows.
+- **One external API**, with designed states for loading, nothing found, and the
+  API being down.
+- **Persistence:** what you save is still there after signing out and back in, on
+  another device. This is the requirement that makes accounts worth having here —
+  pack on a laptop over several evenings, tick items off on a phone at the suitcase.
+- **Keys** in environment variables, never in the code or the repository, with a
+  deny rule for `.env` files.
+- **One Playwright test** proving two users can't see each other's data, *watched
+  failing* before it passes. Break RLS on purpose to see it fail.
+- **`/security-review`** run on the branch, findings handled.
+- **Deployed on Vercel**, where a classmate can make an account and use it.
+- A commit history that shows progress. A one-shot submission is marked incomplete.
+
+Assignment 3's requirements still hold — the UI/UX work is not superseded:
 
 - A page per flow step with shared navigation, and it's clear where you are.
 - First visit gives something useful immediately; no dead-end empty screen.
@@ -279,10 +523,17 @@ Keep these true as the code changes:
 
 ## Conventions
 
-- `src/lib/` is pure logic with no React: `storage.ts`, `climate.ts`,
-  `suggestions.ts`, `trips.ts`. Keep it testable by reading.
+- `src/lib/` is pure logic with no React: `climate.ts`, `suggestions.ts`,
+  `trips.ts`, `inventory.ts`, `open-meteo.ts`, `trips-db.ts`. Keep it testable by
+  reading. (`storage.ts` is gone — localStorage was Assignment 3's backend.)
+- Three Supabase clients, and the distinction is the access-control story:
+  `lib/supabase.ts` (browser, caller's Clerk token), `lib/supabase-server.ts`
+  (route handlers, also the caller's token), and `lib/supabase-admin.ts` (service
+  role, `import "server-only"`, used for exactly one insert into `climate_cache`).
+  Never reach for the third for anything with a `user_id`.
 - `src/components/` is the shared component set.
-- Dates are stored as `YYYY-MM-DD` strings, never `Date` objects, so what's in
-  `localStorage` is readable and timezone-stable.
-- IDs come from `crypto.randomUUID()`.
+- Dates are stored as `YYYY-MM-DD` strings, never `Date` objects, so a row reads
+  plainly in the table editor and is timezone-stable.
+- IDs come from `crypto.randomUUID()` in the client, not the column default, so
+  an optimistic row carries its final id immediately.
 - Commit in small steps — the commit history is graded.

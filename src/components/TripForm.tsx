@@ -39,18 +39,35 @@ type Errors = Partial<
   Record<"name" | "destination" | "startDate" | "endDate", string>
 >;
 
-export function TripForm({ repeatOf }: { repeatOf?: Trip }) {
+export function TripForm({
+  repeatOf,
+  preset,
+}: {
+  /** Repeating a finished trip: carries its name and place, but not its dates. */
+  repeatOf?: Trip;
+  /**
+   * A starter someone picked before signing in, which *does* carry dates.
+   *
+   * The difference is the point. Repeating "Lisbon in March" means next March,
+   * so inheriting last year's dates would be wrong. Picking "A week somewhere
+   * warm" from the front door means the dates it advertised on the card — the
+   * person has already seen "November 25 – December 1" and agreed to it.
+   */
+  preset?: Trip;
+}) {
   const { addTrip } = useTrips();
   const router = useRouter();
 
-  const [name, setName] = useState(repeatOf?.name ?? "");
-  const [destination, setDestination] = useState(repeatOf?.destination ?? "");
-  const [climateSlug, setClimateSlug] = useState(repeatOf?.climateSlug ?? "");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [band, setBand] = useState<TempBand>(repeatOf?.manualBand ?? "mild");
+  const source = repeatOf ?? preset;
+
+  const [name, setName] = useState(source?.name ?? "");
+  const [destination, setDestination] = useState(source?.destination ?? "");
+  const [climateSlug, setClimateSlug] = useState(source?.climateSlug ?? "");
+  const [startDate, setStartDate] = useState(preset?.startDate ?? "");
+  const [endDate, setEndDate] = useState(preset?.endDate ?? "");
+  const [band, setBand] = useState<TempBand>(source?.manualBand ?? "mild");
   const [wetness, setWetness] = useState<Wetness>(
-    repeatOf?.manualWetness ?? "some-rain",
+    source?.manualWetness ?? "some-rain",
   );
   const [errors, setErrors] = useState<Errors>({});
   const formRef = useRef<HTMLFormElement>(null);

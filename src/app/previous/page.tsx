@@ -118,7 +118,6 @@ function PastTrip({ trip }: { trip: Trip }) {
       <div className="flex flex-1 flex-col p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Label>{formatDateRange(trip.startDate, trip.endDate)}</Label>
-          {trip.isExample && <Badge tone="warning">Example</Badge>}
           {!trip.review && <Badge tone="warning">Not reviewed</Badge>}
         </div>
 

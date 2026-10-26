@@ -42,11 +42,14 @@ type FieldProps = {
   optional?: boolean;
   hint?: string;
   error?: string;
+  /** Layout only — for sitting a field in a row beside another. */
+  className?: string;
   children: (props: ControlProps) => React.ReactNode;
 };
 
 export function Field({
   label,
+  className = "",
   optional = false,
   hint,
   error,
@@ -61,7 +64,7 @@ export function Field({
     undefined;
 
   return (
-    <div className="mb-6">
+    <div className={`mb-6 ${className}`}>
       <label
         htmlFor={id}
         className="mb-1.5 block font-sans text-small font-semibold text-ink"

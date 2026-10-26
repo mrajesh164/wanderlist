@@ -196,8 +196,14 @@ export function AddKitForm({
           </Field>
         </div>
 
-        <div className="sm:w-52">
-          <Field label="Where it goes" error={categoryError}>
+        {/* Side by side rather than stacked. Stacked, these two came to more
+            than the textarea's height, so both columns ended on different
+            lines and the panel read as two misaligned halves. In a row they
+            share the textarea's top edge, their labels sit on one line with
+            "What do you have?", and the space beneath them reads as deliberate
+            rather than as a gap. */}
+        <div className="flex gap-3 sm:w-64">
+          <Field label="Where it goes" error={categoryError} className="flex-1">
             {(props) => (
               <>
                 <Select
@@ -233,10 +239,10 @@ export function AddKitForm({
             )}
           </Field>
 
-          {/* Applies to everything in this submission, like the category above
-              it. Most things are one, so it starts at 1 and is there for the
-              times they aren't. */}
-          <Field label="How many" error={qtyError}>
+          {/* Applies to everything in this submission, like the category
+              beside it. Most things are one, so it starts at 1 and is there
+              for the times they aren't. */}
+          <Field label="How many" error={qtyError} className="w-20">
             {(props) => (
               <TextInput
                 {...props}
