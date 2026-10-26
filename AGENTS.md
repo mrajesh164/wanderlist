@@ -16,8 +16,9 @@ Packing lists for your favorite destinations. You keep the trips you take again 
 the last time you took it, and already adjusted for how long you're going and what
 the weather does there that month.
 
-Course: Design, Build, Ship · MPCS 51238 · Assignment 3 (Patterns & Flows).
-Due Tuesday, October 20 2026, 5:30 PM.
+Course: Design, Build, Ship · MPCS 51238 · Assignment 4 (Full Stack App).
+Due Tuesday, October 27 2026, 5:30 PM. Assignment 3's work is on `main`; this
+branch adds accounts, a database and one external API on top of it.
 
 ## The three flows
 
@@ -211,16 +212,23 @@ and a constraint makes it real.
 how many, which the inventory treats differently from a number someone chose. See
 the quantity rules above; **do not add `default 1`.**
 
-### climate_cache — step 6, don't build it yet
+### climate_cache
 
-Shared, derived, owned by nobody. Keyed by place and month, holding the averaged
-normals plus how many years went into them and when it was fetched. No `user_id`.
+Shared, derived, owned by nobody. Keyed by coordinates rounded to 0.1° and the
+month, holding the averaged normals plus how many years went into them and when
+it was fetched. No `user_id`.
 
 It exists because the free weather tier rate-limits per IP, and because normals
 for March in Lisbon are identical for every user on the planet — so one fetch
 should serve everybody. That is also the answer to "where do you call the API and
 why there": on the server, because the result is shared and caching it is the
 whole point.
+
+Measured, not assumed: a cold lookup is 15 sequential Open-Meteo requests at
+about 5.3s; the same lookup served from this table takes 741ms. Open-Meteo
+returned 429 after roughly ten calls from one shared IP, and their terms warn
+that platforms like Vercel are throttled early, so without the cache the second
+visitor to look up a city would be refused.
 
 ### Row-level security
 
@@ -247,22 +255,28 @@ with no update or delete policy it would have stayed. Writes are now refused by
 an explicit `with check (false)` rather than a missing policy, so the refusal is
 visible to anyone reading `pg_policies` instead of looking like an oversight.
 
-### What the port breaks
+### What the port broke
 
-Assignment 3's state layer does not survive, and these are the pieces that need
-designing rather than translating:
+Assignment 3's state layer did not survive. These needed designing rather than
+translating, and all four are **done** — recorded because the reasoning is
+easier to lose than the code:
 
-- **`HAS_TRIPS_SCRIPT` and `data-has-trips` die.** That inline script read
-  `localStorage` during HTML parsing so a returning person never saw the
-  first-visit screen flash. There are three states now — signed out, signed in
-  with nothing, signed in with trips — and the client cannot know which. The
-  server can, so this becomes a server-component decision.
-- **`readState` / `writeState` go away** along with `STORAGE_KEY` and
-  `LEGACY_STORAGE_KEY`. Every page currently mutates one synchronous blob;
-  per-entity async writes need loading and error states that don't exist yet.
-- **Seeding the worked example** (`is_example`) moves server-side, to first
-  sign-in rather than first paint.
-- **Ids** come from the database, not `crypto.randomUUID()` in the browser.
+- **`HAS_TRIPS_SCRIPT` and `data-has-trips` died.** Replaced by the three-state
+  gate described under *Stack notes*. The client cannot know which of signed
+  out / signed in empty / signed in with trips applies before paint, so it
+  admits that rather than guessing.
+- **`readState` / `writeState` are gone** with `STORAGE_KEY` and
+  `LEGACY_STORAGE_KEY`. Writes are optimistic — a round trip per checkbox tick
+  would make packing feel broken — and a refused write sets `error` and
+  refetches so the screen converges on the database rather than drifting.
+- **Ids stay client-generated**, which is the one place the plan changed: it
+  keeps `addTrip` synchronous for callers and lets an optimistic row carry its
+  final id instead of swapping a placeholder when the insert returns.
+- **Seeding the worked example** (`is_example`) is the one piece **still
+  outstanding**. It used to be built on first paint from `lib/example.ts`; with
+  accounts it belongs at first sign-in, server-side. Until then a brand-new
+  account sees the starter trips but not the worked example, so the correction
+  loop goes unillustrated — which was the whole reason that component exists.
 
 ## Hard constraints
 
@@ -316,18 +330,18 @@ Next.js 16.4.2, React 19.3, Tailwind v4. Three things differ from older training
    `src/app/globals.css` with `@theme`. Add a color there and it becomes a utility
    (`--color-accent` → `bg-accent`, `text-accent`).
 
-3. **Reading `localStorage` naively causes a hydration mismatch or a flash.** A
-   returning user must never see the first-visit screen flicker past. The fix, from
-   `node_modules/next/dist/docs/01-app/02-guides/preventing-flash-before-hydration.md`:
-   an inline script in `<head>` sets `data-has-trips` on `<html>` during HTML parsing,
-   and the provider reads the *same* key so React's initial state agrees with the
-   DOM. Keep those two in sync — if you change the storage key, change it in both
-   places.
+3. **The first-visit gate has three states, not two.** A returning person must
+   never see the first-visit screen flicker past. Assignment 3 solved that with an
+   inline `<head>` script reading `localStorage` before first paint; that script
+   and `lib/storage.ts` are both **gone**, because the answer now comes from
+   Supabase over the network and cannot be known before paint — and because with
+   accounts there are three cases: signed out, signed in with nothing, signed in
+   with trips.
 
-   Keys are `wanderlist.*`. Each falls back to a `departure-board.*` predecessor
-   from before the rename and writes forward on first read, so nobody's saved
-   trips were orphaned — `LEGACY_STORAGE_KEY` in `lib/storage.ts`. The inline
-   script checks both names for the same reason.
+   `<html>` therefore ships `data-has-trips="loading"`, which `globals.css` uses to
+   hide *both* faces, and `TripsProvider` rewrites it to `yes`/`no` once the fetch
+   resolves. A frame of nothing beats a frame of the wrong screen. If you add a
+   fourth state, the CSS gate and that effect must change together.
 
 4. **Hand-written CSS must go in `@layer base`.** Tailwind v4 emits utilities
    inside a cascade layer, and unlayered rules beat layered ones regardless of
@@ -435,10 +449,17 @@ Assignment 3's requirements still hold — the UI/UX work is not superseded:
 
 ## Conventions
 
-- `src/lib/` is pure logic with no React: `storage.ts`, `climate.ts`,
-  `suggestions.ts`, `trips.ts`. Keep it testable by reading.
+- `src/lib/` is pure logic with no React: `climate.ts`, `suggestions.ts`,
+  `trips.ts`, `inventory.ts`, `open-meteo.ts`, `trips-db.ts`. Keep it testable by
+  reading. (`storage.ts` is gone — localStorage was Assignment 3's backend.)
+- Three Supabase clients, and the distinction is the access-control story:
+  `lib/supabase.ts` (browser, caller's Clerk token), `lib/supabase-server.ts`
+  (route handlers, also the caller's token), and `lib/supabase-admin.ts` (service
+  role, `import "server-only"`, used for exactly one insert into `climate_cache`).
+  Never reach for the third for anything with a `user_id`.
 - `src/components/` is the shared component set.
-- Dates are stored as `YYYY-MM-DD` strings, never `Date` objects, so what's in
-  `localStorage` is readable and timezone-stable.
-- IDs come from `crypto.randomUUID()`.
+- Dates are stored as `YYYY-MM-DD` strings, never `Date` objects, so a row reads
+  plainly in the table editor and is timezone-stable.
+- IDs come from `crypto.randomUUID()` in the client, not the column default, so
+  an optimistic row carries its final id immediately.
 - Commit in small steps — the commit history is graded.
