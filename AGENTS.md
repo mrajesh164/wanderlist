@@ -197,9 +197,17 @@ compares against the JWT's subject claim instead:
 | `items` | `jsonb not null default '[]'` | the checklist — see below |
 | `learned` | `jsonb not null default '{"drop":[],"add":[]}'` | corrections carried forward |
 | `review` | `jsonb` | `neverUsed`, `wishedFor`, `reviewedAt` |
-| `is_example` | `boolean not null default false` | the worked example |
+| `is_example` | `boolean not null default false` | **vestigial** — see below |
 | `completed_at` | `timestamptz` | set when the trip is finished |
 | `created_at` | `timestamptz not null default now()` | |
+
+**`is_example` is vestigial and deliberately left alone.** It flagged the one
+trip that was a demonstration rather than a real one, so it could be badged
+wherever it appeared. That feature was removed in Assignment 4, and the column
+stayed: nothing writes it, every row holds the default `false`, and dropping a
+column is a destructive migration with no benefit beyond tidiness. Don't write
+to it, don't read it, and don't let its presence imply the example is coming
+back.
 
 **Items stay as `jsonb` rather than becoming a fourth table.** The checklist is
 always read and written whole: no query filters, sorts or joins on a single item,
