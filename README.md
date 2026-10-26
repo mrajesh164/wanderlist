@@ -8,10 +8,14 @@ dates and the weather where you're going *that month*. Afterwards you say what y
 need and what you wished you'd brought, and the next time you pack that trip, the list
 starts already corrected.
 
-Built for **Design, Build, Ship · MPCS 51238 · Assignment 3 (Patterns & Flows)**.
+Built for **Design, Build, Ship · MPCS 51238**. Assignment 3 designed the flows and the
+interface; **Assignment 4 (Full Stack App)** put accounts, a database and one external API
+underneath them, which is what makes the list follow you from the laptop you planned on to
+the phone beside the suitcase.
 
-- **Live:** https://departure-board-nine.vercel.app/
-- **Repo:** https://github.com/mrajesh164/departure-board — named before the app was
+- **Live:** https://wanderlist-mocha.vercel.app/ — production follows `main`
+- **Assignment 3's build:** https://departure-board-nine.vercel.app/ — a separate repo,
+  still up, no accounts and no backend
 - **Flows:** [`flows.md`](./flows.md) · **Onboarding research:** [`research.md`](./research.md)
 - **Agent context:** [`AGENTS.md`](./AGENTS.md)
 
@@ -54,10 +58,12 @@ end the brief warns about. Instead the front door offers two equal routes: pick 
 three ready-made trips, or plan your own. One tap on a starter creates a real trip with
 real dates and a real packing list, before a single field is filled in.
 
-Below them sits a worked example: a trip already packed twice, with its corrections shown
-inline — laundry sheets marked "you added this last time", a sun hat struck through as
-never used. That carries the part a first visit otherwise can't, since the loop takes two
-trips to happen.
+Assignment 3 sat a worked example underneath them — a trip already packed twice, its
+corrections shown inline — on the argument that the correction loop takes two trips to
+demonstrate and a first visit can't otherwise show it. It's gone: it was a fourth thing
+competing for the first screen, and signed out it walked people into a trip that had
+never been saved. The loop is now explained in words and shown by the second trip anyone
+actually takes.
 
 **Coming back** happens on three clocks. Mid-pack, because packing takes several evenings
 and a part-packed list is an invitation to finish it. Before the trip, because home and
@@ -97,8 +103,9 @@ flowchart TD
 Part-packed is a first-class state rather than an in-between: packing over several
 sessions is the shortest-cycle reason anyone reopens this app, so Upcoming surfaces it
 ("Lisbon — 7 items left") and the list reopens exactly where it was left, filter included.
-A quiet **Saved** appears beside the tally whenever the list changes, because everything
-writes to `localStorage` immediately and nothing otherwise said so.
+A quiet **Saved** appears beside the tally whenever the list changes, because every tick
+is written immediately and nothing otherwise said so. It means the same thing it always
+did; what's behind it changed, from one key in `localStorage` to a row in Postgres.
 
 Both directions teach the list. Add an item by hand and it goes to `learned.add` *and*
 your inventory; remove a suggested one and it goes to `learned.drop`. After two or three
@@ -162,11 +169,13 @@ inventory, would warn on every row that asks for more than one.
 
 ## How the list gets built
 
-No forecast is fetched — the brief rules out external APIs, and the running app makes no
-network call for data (`fetch` appears nowhere in `src/`). [`src/lib/climate.ts`](./src/lib/climate.ts)
-ships approximate monthly normals for 33 destinations instead, which suits the problem
-better: a trip you repeat is usually planned well past any forecast horizon, so the real
-question is "what is March usually like in Lisbon", not "what's the weather on the 14th".
+No forecast is fetched, and that's a choice rather than a limitation: a trip you repeat is
+usually planned well past any forecast horizon, so the real question is "what is March
+usually like in Lisbon", not "what's the weather on the 14th". The numbers come from
+fifteen years of Open-Meteo's archive, averaged per calendar date — see **Accounts, data
+and the one API** below. [`src/lib/climate.ts`](./src/lib/climate.ts) still ships
+approximate monthly normals for 33 destinations, which is now the fallback for when the
+lookup can't answer rather than the only source.
 
 `buildPackingList` combines three inputs:
 
@@ -179,15 +188,97 @@ question is "what is March usually like in Lisbon", not "what's the weather on t
 A trip spanning a month boundary packs for the harder half — the colder high and the
 wetter month — rather than the average.
 
-Every trip states where its weather came from: a `Typical for November` badge, the
-conditions, and a line saying plainly that it isn't a forecast. That came out of the
-research — PackPoint mixes live forecasts with climate averages and had to start labelling
-which one you're looking at.
+Every trip states where its weather came from: a badge naming the month and the place, a
+one-line summary, and then a cell per day of the trip — weekday, a glyph, the daytime high
+and the overnight low, tinted by what kind of day it usually is. The strip's header says
+once that these are averages across fifteen years rather than a forecast, instead of
+repeating a disclaimer on every cell. That labelling came out of the research: PackPoint
+mixes live forecasts with climate averages and had to start marking which one you're
+looking at.
 
 The destination photos are static Wikimedia CDN references, resolved once by hand and
 each verified; the app never calls an API for them. Where there's no photo, `DestinationArt`
 draws a poster generated *from the climate data*, so an unfamiliar destination still gets
 an image that means something.
+
+## Accounts, data and the one API
+
+Three pieces went in underneath Assignment 3's interface, and the interface barely moved —
+every route still reads its data through one `useTrips()` hook, which is what made the
+swap survivable.
+
+**Accounts — Clerk, on development keys.** [`src/proxy.ts`](./src/proxy.ts) turns away a
+signed-out visitor at every route that touches somebody's data; the masthead tabs are
+hidden rather than shown as locked doors. Exactly three routes are public — `/`,
+`/sign-in` and `/sign-up` — allow-listed rather than enumerating the private ones, so a
+route added later is protected by default. Home is on that list because the first visit
+*is* the onboarding and a sign-in wall in front of it would be a dead end with a form on
+it; it shows nothing personal, which is what the requirement is actually about. (`/trips`
+carries the same starter cards, but only for someone signed in with nothing saved yet.) A
+starter card works signed out too: it links to `/trips/new?starter=<key>`
+instead of writing a row, the query survives the sign-in redirect, and the trip is waiting
+afterwards rather than lost.
+
+**Data — Supabase, with row-level security on every table.** `trips` and `kit_items` are
+fenced per person; `climate_cache` is shared reference data nobody owns.
+
+Clerk user ids are strings (`user_2abc…`), not UUIDs, so `user_id` is `text` and every
+policy compares against the JWT's subject claim rather than `auth.uid()`:
+
+```sql
+(auth.jwt() ->> 'sub') = user_id
+```
+
+Each of the two per-user tables has all four policies, and insert and update carry a
+`with check` as well as a `using` — without it, `using` alone would let someone write a
+row stamped with another person's id. `climate_cache` is the deliberate contrast:
+readable by any signed-in user, and writes refused by an explicit `with check (false)`, so
+the refusal is visible to anyone reading `pg_policies` instead of looking like a missing
+policy. Only the server writes it, holding the service role.
+
+That split is why there are three Supabase clients, and the distinction *is* the
+access-control story:
+
+| Client | Runs | Identity it carries |
+|---|---|---|
+| [`src/lib/supabase.ts`](./src/lib/supabase.ts) | browser | the caller's Clerk token |
+| [`src/lib/supabase-server.ts`](./src/lib/supabase-server.ts) | route handlers | the caller's Clerk token |
+| [`src/lib/supabase-admin.ts`](./src/lib/supabase-admin.ts) | server only | the service role — exactly one insert, into `climate_cache` |
+
+The third carries `import "server-only"`, so importing it from a client component fails the
+build rather than shipping a service-role key to the browser. Nothing with a `user_id` ever
+goes through it.
+
+**The API — Open-Meteo, called on the server, and cached.** A lookup geocodes the
+destination, then averages fifteen Octobers (or Marches, or whichever month the trip is
+in) from the archive endpoint, per calendar date. It runs at
+[`/api/climate`](./src/app/api/climate/route.ts) rather than in the browser for two
+measured reasons: a cold lookup is fifteen sequential requests at about **5.3s**, the same
+lookup served from `climate_cache` takes **741ms**, and Open-Meteo returned `429` after
+roughly ten calls from one shared IP — their terms warn that platforms like Vercel are
+throttled early. Normals for March in Lisbon are also identical for every user on the
+planet, so one fetch should serve everybody. Caching shared, derived data is the whole
+argument for putting the call there.
+
+Four states are designed, and two of them are deliberately not the same thing:
+
+| State | What you see |
+|---|---|
+| Loading | "Looking up what these dates are usually like in Lisbon…" |
+| Found | the day strip, and the list built from those numbers |
+| Nothing found | the destination isn't on the map — the input is the problem, so the fix is offered: a different spelling, or a nearby larger city |
+| API down | the built-in table takes over and says so; nothing to act on, so nothing is asked |
+
+The last two look alike and read completely differently: one is a typo, the other isn't
+your fault. Collapsing them into "couldn't load weather" would blame the person for an
+outage.
+
+**The test.** [`e2e/isolation.spec.ts`](./e2e/isolation.spec.ts) signs two Clerk accounts
+in, saves a trip from each, and asserts neither board shows the other's — a real browser,
+a real session, a real Postgres with RLS on, because a unit test would only prove the SQL
+says what I wrote. It was watched failing first: with the select policy loosened to
+`using (true)` it reported `Expected: 0, Received: 1`, then passed again once restored
+with identical app code. Both migrations are kept, because the pair is the evidence.
 
 ## Forms and their errors
 
@@ -218,23 +309,50 @@ repeat means you own another one, so the count goes up and the form says `Socks 
 
 ## Tech
 
-Next.js 16.4.2 (App Router), React 19.3, Tailwind CSS v4. Dependencies are exactly `next`,
-`react` and `react-dom`. All state is in `localStorage`; there is no database, no account,
-no backend and no external API. Deployed on Vercel's Hobby plan.
+Next.js 16.4.2 (App Router), React 19.3, Tailwind CSS v4, Clerk for accounts, Supabase for
+data, Playwright for the one test. Those are the whole dependency list — still no state
+library, no form library, no date library, no UI kit and no icon package; the glyphs on the
+day strip are hand-written SVG paths for the same reason. Deployed on Vercel's Hobby plan.
 
 The design system is **Café Terrace**, carried over from Assignment 2 — parchment and
 pressed ink under a red awning, 0px corners, hard-offset shadows, Fraunces and Source Sans.
 Every control comes from one of three files (`Button`, `Field`, `Controls`); a grep for
 `<button`, `<input`, `<textarea` or `<select` finds nothing outside them.
 
+### Running it yourself
+
 ```bash
 npm install
-npm run dev
+npm run dev          # http://localhost:3000
+npm run build        # the check that actually catches things
+npm run test:e2e     # the two-user isolation test
 ```
 
+It needs a Clerk application and a Supabase project of your own. Put their keys in
+`.env.local`, which is gitignored and which agents working in this repo are denied read,
+write and edit access to — see `.claude/settings.json`. **No value below belongs in a
+commit;** these are the names only:
+
+| Variable | Where it's read |
+|---|---|
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk's SDK, browser and server |
+| `CLERK_SECRET_KEY` | Clerk's SDK, server — and `clerkSetup()` in the Playwright run |
+| `NEXT_PUBLIC_SUPABASE_URL` | all three Supabase clients |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | the browser and route-handler clients (`NEXT_PUBLIC_SUPABASE_ANON_KEY` is accepted too — Supabase renamed it, and which one you have depends on when you copied it) |
+| `SUPABASE_SERVICE_ROLE_KEY` | `supabase-admin.ts` only, server-side, for the one cache insert |
+
+Clerk and Supabase also have to be introduced to each other: Supabase's third-party auth
+integration points at the Clerk instance, so Supabase verifies Clerk's token directly and
+`auth.jwt() ->> 'sub'` resolves to the signed-in Clerk id. If that connection is missing
+the app doesn't error — every policy matches nothing and the app simply looks *empty*.
+Rule it out first when rows vanish.
+
+The same five go in Vercel's environment variables. Migrations live in
+[`supabase/migrations/`](./supabase/migrations) and run in filename order.
+
 There's a **Reset to first visit** control in the footer, which is the quickest way to see
-the onboarding again — everything is stored on one device, so it's otherwise unreachable
-once you've saved a trip.
+the onboarding again — it's otherwise unreachable once you've saved a trip. It now deletes
+rows from your account rather than clearing one browser, which is why it asks twice.
 
 ## Accessibility
 
@@ -258,7 +376,11 @@ accent and ink fills, and each category pigment on its own tint. Four failed:
 Each replacement scales HLS lightness only, so hue and saturation are untouched and the
 palette still reads as one ink set. All 49 pairs now pass.
 
-## First-run check
+## First-run check — Assignment 3
+
+Kept as written, so the record stays honest: this pass predates accounts and the database,
+and reads `localStorage` where the app now reads Postgres. All four findings were fixed at
+the time.
 
 **Method, stated plainly:** the browser tooling available here can't attach to a remote
 URL, so the live deployment was verified by request (every route returns 200, and the
