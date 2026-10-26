@@ -320,15 +320,62 @@ which is being replaced — see **Data model** above.
   the assignment grades. Nothing API-related is built until auth and the database
   are standing — it's step 6 for a reason.
 - **Keys go in `.env.local`, never in the code or a commit.** `.claude/settings.json`
-  denies `Read(./.env)` and `Read(./.env.*)`, so an agent cannot read them and must
-  not try. Do not add `Bash(cat:*)`, `head`, `tail`, `grep` or `python3` to the
-  allow list: those read `.env.local` straight past the deny rule.
+  denies `Read`, `Edit` and `Write` on `**/.env*` — globbed, because the first
+  version used `./.env.*` and anchored the `./` to the session root rather than
+  the repo, so it silently guarded nothing. Do not add `Bash(cat:*)`, `head`,
+  `tail`, `grep` or `python3` to the allow list: those read `.env.local`
+  straight past the deny rule.
 - **No new packages** beyond what Clerk, Supabase and Playwright require, without
   asking first. Still no state library, no form library, no date library, no UI
   kit, no icon package.
 - Deployed on Vercel's free Hobby plan. Work on a branch; `main` holds the
   Assignment 3 submission until the work is reviewed and merged.
 - `AGENTS.md` (this file) is the context file. There must be no `CLAUDE.md`.
+
+**What development keys cost, and what's done about it.** "Clerk, on development
+keys only" reads like a deployment convenience. It isn't — it's a security
+trade-off, and the second `/security-review` pass found the sharp edge. On an
+instance of type `development`, Clerk accepts the token identifying a *client*
+from the **query string** as well as from a cookie, and the only gate is
+`searchParams.has("__clerk_db_jwt")`: no signature check, no origin check. Proven
+against the running app rather than inferred — a document navigation to
+`/?__clerk_db_jwt=FORGED` was 307'd straight to
+`…clerk.accounts.dev/v1/client/handshake?…&__clerk_hs_reason=dev-browser-sync&__clerk_db_jwt=FORGED`,
+with the caller's token forwarded verbatim. With a *real* token — one an attacker
+reads out of their own cookie jar after signing up — the handshake returns that
+client's session cookies, the parameter is scrubbed from the URL, and the visitor
+is quietly operating inside the attacker's account. **Row-level security is no
+defence against this**, which is the part worth being able to say out loud: the
+policies enforce the identity they're given, and this attack hands them the wrong
+one. A fence below the auth layer cannot save you from a lie told above it.
+
+`src/proxy.ts` now strips any inbound `__clerk_db_jwt` query parameter before
+Clerk's middleware sees it and redirects to the clean URL. That is safe *here*
+because sign-in is embedded and same-origin; the parameter's legitimate job is
+carrying the token back from a hosted Account Portal on `*.accounts.dev`, which
+this app never uses. Don't move to Clerk's hosted pages without revisiting it,
+and don't extend the strip to `__clerk_handshake*` — the genuine handshake return
+needs those. Verified after the change by signing in through the real form with
+an emailed code, not just through `clerk.signIn()`. It does **not** make a
+development instance production-safe; only production keys do, and the brief
+forbids them.
+
+**Two things about the Clerk instance live in the dashboard, not in this repo,
+and both are visible to a classmate.** Read from the instance's own
+`/v1/environment` rather than guessed:
+
+- `email_address.required` is **false**, `username.required` is **false** and
+  `password.enabled` is **false**. With nothing required and no password, Clerk's
+  `<SignUp />` has no field it can collect, so **the sign-up card offers only
+  "Continue with Google"** — anyone without a Google account, or unwilling to use
+  one, cannot create an account at all. Sign-*in* is unaffected (email code works,
+  which is why this went unnoticed). Fix in User & authentication → Email, phone,
+  username → Email address → **Required**.
+- `display_config.application_name` is still **"HW4"**, so the card reads "Sign in
+  to HW4".
+
+Neither is settable from the CLI (`clerk config pull`/`patch` don't carry them),
+so they can't be fixed from here.
 
 **Keep the walkthrough's status panel current.** `../assignment-4-walkthrough.html`
 (one level up, outside the repo) carries a **Where this stands** panel: one row
