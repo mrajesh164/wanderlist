@@ -4,11 +4,20 @@ import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { TripForm } from "@/components/TripForm";
 import { useTrips } from "@/app/providers";
+import { createStarterTrip, findStarter } from "@/lib/starters";
 
 /**
- * Add a trip — or repeat one. `?from=<id>` prefills from a finished trip and
- * carries its corrections forward, which is the whole "trips you repeat" idea:
- * the second time you pack something, you shouldn't start from scratch.
+ * Add a trip — or repeat one, or pick up a starter you chose before signing in.
+ *
+ * `?from=<id>` prefills from a finished trip and carries its corrections
+ * forward, which is the whole "trips you repeat" idea: the second time you pack
+ * something, you shouldn't start from scratch.
+ *
+ * `?starter=<key>` is the signed-out path. The starter cards on the front door
+ * can't build a list for someone with no account — the write has nowhere to go
+ * — so signed out they link here instead, and the form arrives already filled
+ * in with the trip they picked. They see a sign-in wall on the way, but the
+ * thing they asked for is waiting on the other side rather than lost.
  *
  * useSearchParams needs a Suspense boundary so the route can still be
  * prerendered as a static shell under cacheComponents.
@@ -28,6 +37,12 @@ function NewTrip() {
 
   const from = params.get("from");
   const repeatOf = from ? trips.find((t) => t.id === from) : undefined;
+
+  /* An unknown key yields undefined and the form opens blank, which is the
+     right failure for a hand-edited URL — better than an error page over a
+     query parameter nobody typed on purpose. */
+  const starter = findStarter(params.get("starter") ?? undefined);
+  const preset = starter ? createStarterTrip(starter) : undefined;
 
   /**
    * Wait for the first load before showing the form at all.
@@ -49,7 +64,7 @@ function NewTrip() {
   return (
     <>
       <Heading repeating={Boolean(repeatOf)} />
-      <TripForm repeatOf={repeatOf} />
+      <TripForm repeatOf={repeatOf} preset={preset} />
     </>
   );
 }

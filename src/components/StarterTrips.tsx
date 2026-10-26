@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Button } from "./Button";
+import { useAuth } from "@clerk/nextjs";
+import { Button, ButtonLink } from "./Button";
 import { WorkedExample } from "./WorkedExample";
 import { Label } from "./Card";
 import { DestinationArt } from "./DestinationArt";
@@ -47,6 +48,23 @@ export function StarterTrips({
 }) {
   const { addTrip } = useTrips();
   const router = useRouter();
+  const { isSignedIn } = useAuth();
+
+  /**
+   * Signed in, a card builds the list on the spot — Assignment 3's "one tap
+   * produces a real list", which is the whole argument for having starters.
+   *
+   * Signed out it has to be a link instead, because `adopt` writes a row and
+   * there is no account to write it to. It used to try anyway: the write was
+   * dropped, the navigation bounced off the middleware, and the person landed
+   * after sign-up on a trip that had never been saved — "That trip isn't here"
+   * as a welcome.
+   *
+   * `isSignedIn === true` rather than `!isSignedIn` so the brief moment before
+   * Clerk resolves takes the link, which works for everyone. Defaulting to the
+   * button would put that broken path back for anyone quick on the click.
+   */
+  const canBuildHere = isSignedIn === true;
 
   function adopt(key: string) {
     const starter = STARTERS.find((s) => s.key === key);
@@ -111,13 +129,28 @@ export function StarterTrips({
                   {formatDateRange(startDate, endDate)} · {starter.destination}
                 </p>
 
-                <Button
-                  variant="primary"
-                  className="mt-3 w-full"
-                  onClick={() => adopt(starter.key)}
-                >
-                  Build this list
-                </Button>
+                {canBuildHere ? (
+                  <Button
+                    variant="primary"
+                    className="mt-3 w-full"
+                    onClick={() => adopt(starter.key)}
+                  >
+                    Build this list
+                  </Button>
+                ) : (
+                  /* Same words on purpose. The card promised a list; saying
+                     "Sign up to build this" here would turn the offer into a
+                     toll gate before anyone has decided they want it. The
+                     sign-in wall arrives next, with the trip waiting behind
+                     it — see /trips/new?starter=. */
+                  <ButtonLink
+                    variant="primary"
+                    className="mt-3 w-full"
+                    href={`/trips/new?starter=${starter.key}`}
+                  >
+                    Build this list
+                  </ButtonLink>
+                )}
               </div>
             </li>
           );
