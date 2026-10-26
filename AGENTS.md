@@ -364,13 +364,16 @@ forbids them.
 and both are visible to a classmate.** Read from the instance's own
 `/v1/environment` rather than guessed:
 
-- `email_address.required` is **false**, `username.required` is **false** and
-  `password.enabled` is **false**. With nothing required and no password, Clerk's
-  `<SignUp />` has no field it can collect, so **the sign-up card offers only
-  "Continue with Google"** — anyone without a Google account, or unwilling to use
-  one, cannot create an account at all. Sign-*in* is unaffected (email code works,
-  which is why this went unnoticed). Fix in User & authentication → Email, phone,
-  username → Email address → **Required**.
+- **Email is now a required attribute — fixed, and worth not undoing.** It used to
+  be optional, as were `username` and `password`, and with *nothing* required
+  Clerk's `<SignUp />` had no field it could collect: the sign-up card offered
+  only "Continue with Google", so anyone without a Google account could not create
+  one at all. Sign-*in* was unaffected, because email codes work for accounts that
+  already exist, which is exactly why it went unnoticed — the only way to find it
+  was to try signing up as a stranger. Now `email_address.required` is true and a
+  new account is created with an email and a code, verified end to end through the
+  real form. If the sign-up card ever shows nothing but social buttons again, this
+  setting is the first place to look.
 - `display_config.application_name` is still **"HW4"**, so the card reads "Sign in
   to HW4".
 
