@@ -78,12 +78,15 @@ export async function GET(request: Request) {
 
   const cached = await supabase
     .from("climate_cache")
-    .select("high_c, low_c, rain_days, sample_years, label, fetched_at")
+    .select("high_c, low_c, rain_days, sample_years, label, fetched_at, days")
     .eq("place_key", key)
     .eq("month", month)
     .maybeSingle();
 
-  if (cached.data) {
+  /* A row cached before the per-day column existed has no `days` to infer, so
+     it is treated as a miss and refetched rather than served short. The refetch
+     writes through the service role, which can update as well as insert. */
+  if (cached.data && Array.isArray(cached.data.days)) {
     return NextResponse.json({
       source: "cache",
       place: cached.data.label ?? resolved.label,
@@ -93,6 +96,7 @@ export async function GET(request: Request) {
       lowC: Number(cached.data.low_c),
       rainDays: Number(cached.data.rain_days),
       sampleYears: cached.data.sample_years,
+      days: cached.data.days,
       fetchedAt: cached.data.fetched_at,
     });
   }
@@ -121,16 +125,24 @@ export async function GET(request: Request) {
      exceptional: losing a race to another user asking for the same city, and
      the service key not being configured at all, which simply means no cache. */
   const admin = supabaseAdmin();
+  /* upsert rather than insert: a row cached before the per-day column existed
+     is refetched above, and inserting over it would collide on the primary
+     key. */
   const written = admin
-    ? await admin.from("climate_cache").insert({
-        place_key: key,
-        month,
-        high_c: normals.highC,
-        low_c: normals.lowC,
-        rain_days: normals.rainDays,
-        sample_years: normals.sampleYears,
-        label: resolved.label,
-      })
+    ? await admin.from("climate_cache").upsert(
+        {
+          place_key: key,
+          month,
+          high_c: normals.highC,
+          low_c: normals.lowC,
+          rain_days: normals.rainDays,
+          sample_years: normals.sampleYears,
+          days: normals.days,
+          label: resolved.label,
+          fetched_at: new Date().toISOString(),
+        },
+        { onConflict: "place_key,month" },
+      )
     : null;
 
   return NextResponse.json({

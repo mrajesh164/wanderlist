@@ -1,6 +1,8 @@
 import { Badge } from "./Card";
-import { describeConditions, toF, type Conditions } from "@/lib/climate";
-import type { ClimateFetch } from "@/lib/use-climate";
+import { ConditionsStrip } from "./ConditionsStrip";
+import { describeConditions, type Conditions } from "@/lib/climate";
+import { tripDays } from "@/lib/trip-days";
+import type { TripClimate } from "@/lib/use-climate";
 
 /**
  * What the weather is expected to do, and — just as importantly — where that
@@ -13,11 +15,15 @@ import type { ClimateFetch } from "@/lib/use-climate";
  * That's the whole lesson: a packing list that quietly mixes "it will rain on
  * Tuesday" with "it usually rains in March" is a list you stop trusting.
  *
- * This app only ever has the second kind, so it says so, every time. That was
- * once forced by Assignment 3's no-API rule; now the numbers come from
- * Open-Meteo's reanalysis archive and the labelling matters more, not less —
- * because there are now three places a number can come from and the person
- * deserves to know which one they're reading.
+ * Everything here is the second kind, and it says so once — in the strip's own
+ * header — rather than repeating a disclaimer per day.
+ *
+ * This used to be a paragraph describing the month. A sentence like "Cold,
+ * 31–44°F, some rain" is true of December in New York and tells you nothing
+ * about whether the 10th differs from the 17th. The strip shows the shape of
+ * the actual dates, which is what you pack from; the sentence stays as a
+ * one-line summary above it, because the band and wetness it names are what
+ * the list was generated from.
  */
 
 export function ConditionsNote({
@@ -26,20 +32,26 @@ export function ConditionsNote({
   destination,
   source,
   live,
+  startDate,
+  endDate,
 }: {
   conditions: Conditions;
   month: string;
   destination: string;
-  /** Where the fallback numbers came from. */
+  /** Where the fallback numbers came from, when the lookup can't answer. */
   source: "climate" | "manual";
-  /** What the live lookup is doing. Absent on screens that don't fetch. */
-  live?: ClimateFetch;
+  live: TripClimate;
+  startDate: string;
+  endDate: string;
 }) {
+  const days =
+    live.state === "ok" ? tripDays(startDate, endDate, live.byMonth) : [];
+
   return (
     <div className="mt-2">
       <div className="flex flex-wrap items-center gap-2">
         <Badge>
-          {live?.state === "ok"
+          {live.state === "ok"
             ? `${month} in ${live.place.split(",")[0]}`
             : source === "climate"
               ? `Typical for ${month}`
@@ -50,35 +62,17 @@ export function ConditionsNote({
         </span>
       </div>
 
-      {live?.state === "ok" ? (
-        /* "Averaged from 15 years of recorded weather" does the work the old
-           "not a forecast" disclaimer used to do, and does it better — it says
-           what the number *is* rather than what it isn't. Whether the row came
-           from the cache or the API is a developer's concern, not a
-           traveller's; it stays in the route's JSON for debugging.
-
-           The attribution is not optional: Open-Meteo's data is CC BY 4.0. */
+      {live.state === "ok" && days.length > 0 ? (
+        <ConditionsStrip
+          days={days}
+          sampleYears={live.sampleYears}
+          place={live.place}
+        />
+      ) : live.state === "loading" ? (
         <p className="measure mt-1.5 text-small text-muted">
-          Averaged from {live.sampleYears} years of recorded weather:{" "}
-          <strong className="text-ink">
-            {live.highC}°C / {toF(live.highC)}°F
-          </strong>{" "}
-          by day, down to{" "}
-          <strong className="text-ink">
-            {live.lowC}°C / {toF(live.lowC)}°F
-          </strong>
-          , and {live.rainDays} days of rain in a typical {month}. Weather data
-          by{" "}
-          <a href="https://open-meteo.com" rel="noreferrer noopener">
-            Open-Meteo.com
-          </a>
-          .
+          Looking up what these dates are usually like in {destination}…
         </p>
-      ) : live?.state === "loading" ? (
-        <p className="measure mt-1.5 text-small text-muted">
-          Looking up what {month} is usually like in {destination}…
-        </p>
-      ) : live?.state === "not-found" ? (
+      ) : live.state === "not-found" ? (
         /* The input is the problem, so the fix is theirs to make. */
         <p className="measure mt-1.5 text-small text-muted">
           We couldn&apos;t find <strong className="text-ink">{destination}</strong>{" "}
@@ -86,7 +80,7 @@ export function ConditionsNote({
           {source === "climate" ? "our built-in figures" : "the conditions you picked"}.
           A different spelling, or a nearby larger city, usually works.
         </p>
-      ) : live?.state === "unavailable" ? (
+      ) : live.state === "unavailable" ? (
         /* Nothing the person can do about this one, so don't ask them to act.
            The hardcoded table stops being dead weight and becomes the graceful
            degradation path. */

@@ -35,12 +35,37 @@ export type Place = {
   countryCode?: string;
 };
 
+/**
+ * What one calendar date is typically like — the 10th of December averaged
+ * across every 10th of December we sampled.
+ *
+ * These cost nothing extra. The archive already answers with a value per day
+ * per year; collapsing straight to a monthly mean threw that away.
+ */
+export type DayNormal = {
+  /** Day of the month, 1–31. */
+  day: number;
+  highC: number;
+  lowC: number;
+  /**
+   * Share of sampled years where this date saw 1mm or more, 0–1.
+   *
+   * Per-day rain has to be a likelihood rather than a count: "10.9 rainy days"
+   * is a sentence about a month, and the same idea applied to a single date is
+   * "4 of the last 15 December 10ths were wet". Treating it as a probability is
+   * the honest translation, and it's what an icon can actually represent.
+   */
+  wetChance: number;
+};
+
 export type Normals = {
   highC: number;
   lowC: number;
   rainDays: number;
   /** How many years actually contributed, after failures and gaps. */
   sampleYears: number;
+  /** One entry per day of the month, ascending. */
+  days: DayNormal[];
 };
 
 /**
@@ -164,6 +189,9 @@ export async function fetchNormals(
   const highs: number[] = [];
   const lows: number[] = [];
   const wetDaysPerYear: number[] = [];
+  /* Per day of the month, accumulated across years. Index 0 is the 1st. */
+  const perDay: { highs: number[]; lows: number[]; wet: number; seen: number }[] =
+    Array.from({ length: 31 }, () => ({ highs: [], lows: [], wet: 0, seen: 0 }));
   let lastFailure: unknown;
 
   for (let year = endYear - YEARS + 1; year <= endYear; year++) {
@@ -187,14 +215,34 @@ export async function fetchNormals(
     const daily = block.daily;
     if (!daily) continue;
 
-    for (const value of daily.temperature_2m_max ?? []) {
-      if (value !== null && value !== undefined) highs.push(value);
-    }
-    for (const value of daily.temperature_2m_min ?? []) {
-      if (value !== null && value !== undefined) lows.push(value);
+    const maxes = daily.temperature_2m_max ?? [];
+    const mins = daily.temperature_2m_min ?? [];
+    const rain = daily.precipitation_sum ?? [];
+
+    /* One pass, feeding both the monthly means and the per-day buckets. The
+       index is the offset from the 1st, because the request always starts on
+       the 1st and runs to the real last day of that month. */
+    for (let i = 0; i < maxes.length && i < 31; i++) {
+      const bucket = perDay[i]!;
+      const high = maxes[i];
+      const low = mins[i];
+      const mm = rain[i];
+
+      if (high !== null && high !== undefined) {
+        highs.push(high);
+        bucket.highs.push(high);
+      }
+      if (low !== null && low !== undefined) {
+        lows.push(low);
+        bucket.lows.push(low);
+      }
+      if (mm !== null && mm !== undefined) {
+        bucket.seen += 1;
+        if (mm >= RAIN_MM) bucket.wet += 1;
+      }
     }
 
-    const wet = (daily.precipitation_sum ?? []).filter(
+    const wet = rain.filter(
       (mmRain) => mmRain !== null && mmRain !== undefined && mmRain >= RAIN_MM,
     ).length;
     wetDaysPerYear.push(wet);
@@ -210,10 +258,26 @@ export async function fetchNormals(
   const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
   const round1 = (n: number) => Math.round(n * 10) / 10;
 
+  /* Days the month doesn't have are simply absent: a 30-day month leaves
+     bucket 30 empty, and February leaves two or three empty depending on the
+     years sampled. Filtering on `seen` rather than trusting a length means a
+     29 February averaged over whichever leap years were in range still appears,
+     with a smaller sample behind it. */
+  const days: DayNormal[] = perDay
+    .map((bucket, i) => ({ bucket, day: i + 1 }))
+    .filter(({ bucket }) => bucket.highs.length > 0 && bucket.lows.length > 0)
+    .map(({ bucket, day }) => ({
+      day,
+      highC: round1(mean(bucket.highs)),
+      lowC: round1(mean(bucket.lows)),
+      wetChance: bucket.seen > 0 ? Math.round((bucket.wet / bucket.seen) * 100) / 100 : 0,
+    }));
+
   return {
     highC: round1(mean(highs)),
     lowC: round1(mean(lows)),
     rainDays: round1(mean(wetDaysPerYear)),
     sampleYears: wetDaysPerYear.length,
+    days,
   };
 }

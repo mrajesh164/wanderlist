@@ -11,7 +11,8 @@ import { Checkbox } from "@/components/Field";
 import { PackCount, PackProgress } from "@/components/PackProgress";
 import { SavedNote } from "@/components/SavedNote";
 import { MONTHS, bandFor, wetnessFor } from "@/lib/climate";
-import { useClimate } from "@/lib/use-climate";
+import { useTripClimate } from "@/lib/use-climate";
+import { monthsForApi } from "@/lib/trip-days";
 import { ConditionsNote } from "@/components/ConditionsNote";
 import { EditDates } from "@/components/EditDates";
 import { DestinationArt } from "@/components/DestinationArt";
@@ -70,10 +71,10 @@ function Checklist() {
    * Server-side and cached — see app/api/climate/route.ts for why there rather
    * than in the browser.
    */
-  const tripMonth = trip
-    ? monthsSpanned(trip.startDate, trip.endDate)[0]! + 1
-    : undefined;
-  const live = useClimate(trip?.destination, tripMonth);
+  /* Every month the trip touches, not just its first — a trip across a
+     boundary needs both to draw a complete strip. */
+  const tripMonths = trip ? monthsForApi(trip.startDate, trip.endDate) : [];
+  const live = useTripClimate(trip?.destination, tripMonths);
 
   /* "Hide what's packed" survives a reload, so reopening mid-pack lands you back
      in the same view rather than at the top of a list you'd already narrowed. */
@@ -226,6 +227,8 @@ function Checklist() {
           destination={trip.destination}
           source={trip.climateSlug ? "climate" : "manual"}
           live={live}
+          startDate={trip.startDate}
+          endDate={trip.endDate}
         />
       )}
 
