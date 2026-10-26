@@ -10,7 +10,8 @@ import { AddItemForm } from "@/components/AddItemForm";
 import { Checkbox } from "@/components/Field";
 import { PackCount, PackProgress } from "@/components/PackProgress";
 import { SavedNote } from "@/components/SavedNote";
-import { MONTHS } from "@/lib/climate";
+import { MONTHS, bandFor, wetnessFor } from "@/lib/climate";
+import { useClimate } from "@/lib/use-climate";
 import { ConditionsNote } from "@/components/ConditionsNote";
 import { EditDates } from "@/components/EditDates";
 import { DestinationArt } from "@/components/DestinationArt";
@@ -60,6 +61,19 @@ function Checklist() {
   } = useTrips();
 
   const trip = trips.find((t) => t.id === id);
+
+  /**
+   * The external API, called up here with the rest of the hooks because hooks
+   * can't sit behind the early returns below. The hook returns `idle` for an
+   * absent destination, so asking before we know the trip exists is harmless.
+   *
+   * Server-side and cached — see app/api/climate/route.ts for why there rather
+   * than in the browser.
+   */
+  const tripMonth = trip
+    ? monthsSpanned(trip.startDate, trip.endDate)[0]! + 1
+    : undefined;
+  const live = useClimate(trip?.destination, tripMonth);
 
   /* "Hide what's packed" survives a reload, so reopening mid-pack lands you back
      in the same view rather than at the top of a list you'd already narrowed. */
@@ -118,11 +132,33 @@ function Checklist() {
   const { packed, total } = packedCount(trip.items);
   const left = total - packed;
   const allPacked = total > 0 && left === 0;
-  const conditions = conditionsOf(trip);
   const days = lengthOf(trip);
   const phase = phaseOf(trip);
 
-  const month = MONTHS[monthsSpanned(trip.startDate, trip.endDate)[0]];
+  const month = MONTHS[monthsSpanned(trip.startDate, trip.endDate)[0]!];
+
+  /**
+   * Real numbers win over the built-in table when we have them.
+   *
+   * This is what makes the API load-bearing rather than decorative: the band
+   * and wetness that decide what goes on the list are derived from fifteen
+   * years of recorded weather for *this* destination, not from a 35-city table
+   * that had to be edited by hand. When the lookup fails we fall back to that
+   * table, which is exactly what it's now for.
+   */
+  const conditions =
+    live.state === "ok"
+      ? {
+          highC: live.highC,
+          lowC: live.lowC,
+          rainDays: live.rainDays,
+          band: bandFor(live.highC),
+          wetness: wetnessFor(live.rainDays),
+          /* Drives the outerwear call, so it has to come from the real low
+             rather than being left to default. */
+          freezes: live.lowC <= 0,
+        }
+      : conditionsOf(trip);
 
   /* Everything in the inventory that isn't already on this list, so the picker
      only ever offers something useful. */
@@ -189,6 +225,7 @@ function Checklist() {
           month={month}
           destination={trip.destination}
           source={trip.climateSlug ? "climate" : "manual"}
+          live={live}
         />
       )}
 
