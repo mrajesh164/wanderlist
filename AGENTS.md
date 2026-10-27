@@ -152,6 +152,27 @@ the count. The old "already in your inventory" error was the wrong answer to a
 reasonable request (see the Assignment 3 feedback: owning two t-shirts was
 unsayable).
 
+**Clothing counts stop at ten days, and the trip page says so.**
+`LAUNDRY_CAP_DAYS` in `suggestions.ts` caps the duration-driven quantities —
+underwear and socks at `capped + 1`, tops at `capped` — so a ten-day trip and a
+three-week trip both ask for eleven pairs of socks. The rule is right; past that
+you do laundry rather than carry more. It was also invisible, which made it
+*look* like a bug: move a long trip's dates and "Trousers 4" becomes 5 while
+"Underwear 11" doesn't move. One muted line under the progress bar now states it,
+shown only when `days > LAUNDRY_CAP_DAYS`. Keep the constant and that sentence
+wired together, and don't answer this with a per-row note — those were tried and
+removed, because the same sentence repeated down every row said nothing the
+header hadn't said better.
+
+**One provenance badge on an inventory row, not two.** "Yours" and "Asked for"
+both answered *did a person put this here, or did the generator?* — and on a page
+titled "Your Inventory", "Yours" barely said anything. They are now a single
+**Added by you**, shown for `owned || yourOwn || requested`. The flags stay
+separate in `inventory.ts` because `owned` also gates the remove control; it is
+only the display that merged. The remaining badges are about usefulness —
+**Retired**, **Never used** — which is a different axis and reads clearly beside
+it.
+
 **Categories are open.** `ItemCategory` is a plain `string`; `KNOWN_CATEGORIES`
 holds the seven defaults and `categoriesPresent()` orders known-then-custom. Use
 `styleFor(category)` from `components/categoryStyle.ts` rather than indexing the
