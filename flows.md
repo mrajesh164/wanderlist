@@ -93,7 +93,8 @@ flowchart TD
     end
 
     Actions --> Part
-    AddItem -->|empty or already listed| ItemErr["Error beside the field"]
+    AddItem -->|empty| ItemErr["Error beside the field"]
+    AddItem -->|already on the list| Bump["One more of that row<br/>Socks → 7, in Clothing"]
     ItemErr --> AddItem
     AddItem -.->|remembered next time| LearnAdd[("learned.add + inventory")]
 ```
@@ -150,7 +151,6 @@ person already typed. A failed submit also moves focus to the first invalid fiel
 | End date | empty or unparseable | `Pick an end date.` |
 | End date | before the start date | `End the trip on or after it starts.` |
 | Add item | empty label | `Name the item you want to add.` |
-| Add item | already on the list | `Socks are already on this list.` |
 | New category | empty name | `Name the new category.` |
 | Inventory | nothing listed | `List at least one thing to add.` |
 | Review | empty wish | `Name the thing you wished you'd brought.` |
@@ -158,5 +158,9 @@ person already typed. A failed submit also moves focus to the first invalid fiel
 A destination that isn't in the climate table is deliberately **not** an error. The form
 reveals a conditions picker instead, so any destination in the world still works.
 
-Listing something already in your inventory isn't one either. A repeat means you own
-another, so the count goes up and the form reports `Socks → 3`.
+Adding something that is already there isn’t one either, on **either** form, which is the
+point: a repeat means one more, not a mistake. The inventory form reports `Socks → 3`; the
+checklist adds one to the row that exists and says where it is, `Socks → 7, in Clothing`.
+Both used to refuse. The checklist’s refusal was worse than the inventory’s, because it
+never said *which* section the row was already in — so on a twenty-item list you were sent
+hunting for a thing the app could see and you could not.

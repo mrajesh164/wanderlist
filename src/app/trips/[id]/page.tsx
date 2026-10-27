@@ -311,12 +311,16 @@ function Checklist() {
       {/* --- add your own --- */}
       <div className="mt-8 border-t-2 border-ink pt-5">
         <AddItemForm
-          existingLabels={trip.items.map((i) => i.label)}
+          existingItems={trip.items}
           existingCategories={categoriesPresent(
             trip.items.map((i) => i.category),
           )}
           inventoryOptions={inventoryOptions}
           onAdd={(item) => addItem(trip.id, item)}
+          /* Same thing the row's own stepper does — which is the point: asking
+             for a second T-shirt should not depend on which control you reach
+             for. */
+          onBump={(item) => setItemQty(trip.id, item.id, item.qty + 1)}
         />
       </div>
 

@@ -20,6 +20,20 @@ import { CATEGORY_ORDER } from "@/lib/types";
  * Two error states, both beside the field and both phrased as what to do next.
  * On a failed submit the typed value stays put — the whole point is that you
  * don't retype anything.
+ *
+ * **Typing something already on the list is not one of those errors.** It used
+ * to be: "T Shirt is already on this list." — which is the same wrong answer
+ * the inventory form used to give to the same reasonable request, and which
+ * Assignment 3's feedback already called out there. Two problems with it. It
+ * refused a sensible intent ("I want another T-shirt"), on a list whose every
+ * row carries a quantity stepper for exactly that. And it never said *where*
+ * the thing already was, so on a twenty-item list across seven sections you
+ * were sent hunting — the row can easily be under Extras while you're looking
+ * at Clothing.
+ *
+ * So a repeat now adds one to the row that exists and says so, naming its
+ * section. Same gesture, same outcome as nudging its stepper, no error at all.
+ * See AddKitForm, which resolves the identical case the identical way.
  */
 
 const NEW_CATEGORY = "__new__";
@@ -27,24 +41,32 @@ const NEW_CATEGORY = "__new__";
 export type InventoryOption = { label: string; category: ItemCategory };
 
 export function AddItemForm({
-  existingLabels,
+  existingItems,
   existingCategories,
   inventoryOptions = [],
   onAdd,
+  onBump,
 }: {
-  existingLabels: string[];
+  /** The list as it stands — needed whole, not as labels, so a repeat can add
+      to the row that's already there. */
+  existingItems: Item[];
   /** Custom categories already on this trip, so they can be reused. */
   existingCategories?: ItemCategory[];
   /** Things in your inventory that aren't on this list yet. */
   inventoryOptions?: InventoryOption[];
   onAdd: (item: Item) => void;
+  /** One more of something the list already has. */
+  onBump: (item: Item) => void;
 }) {
   const [label, setLabel] = useState("");
   const [category, setCategory] = useState<string>("Extras");
   const [customCategory, setCustomCategory] = useState("");
   const [error, setError] = useState<string>();
   const [categoryError, setCategoryError] = useState<string>();
-  const [justAdded, setJustAdded] = useState<string>();
+  /* One line of feedback for both outcomes — a new row, or one more of a row
+     that was already there. It holds the whole sentence rather than a label,
+     because those two cases don't say the same thing. */
+  const [note, setNote] = useState<string>();
   const [browsing, setBrowsing] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -62,7 +84,7 @@ export function AddItemForm({
       source: "manual",
       packed: false,
     });
-    setJustAdded(itemLabel);
+    setNote(`Added ${itemLabel}. It'll be here next time too.`);
   }
 
   function submit(event: React.FormEvent) {
@@ -74,10 +96,20 @@ export function AddItemForm({
       queueMicrotask(() => focusFirstError(formRef.current));
       return;
     }
-    if (existingLabels.some((l) => l.toLowerCase() === trimmed.toLowerCase())) {
-      // Echo their own wording back rather than a generic "duplicate".
-      setError(`${trimmed} is already on this list.`);
-      queueMicrotask(() => focusFirstError(formRef.current));
+    /* Already on the list? Add one to it rather than refusing. The category
+       they picked is ignored on purpose: the row keeps the section it's in,
+       and the note says which, so nothing moves under them. */
+    const already = existingItems.find(
+      (i) => i.label.toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (already) {
+      onBump(already);
+      setNote(
+        `${already.label} → ${already.qty + 1}, in ${already.category}.`,
+      );
+      setLabel("");
+      setError(undefined);
+      setCategoryError(undefined);
       return;
     }
 
@@ -114,7 +146,7 @@ export function AddItemForm({
                     setLabel(e.target.value);
                     // Clear the error as soon as they start fixing it.
                     if (error) setError(undefined);
-                    if (justAdded) setJustAdded(undefined);
+                    if (note) setNote(undefined);
                   }}
                 />
               )}
@@ -167,7 +199,7 @@ export function AddItemForm({
 
       {/* Confirmation, announced politely rather than interrupting. */}
       <p aria-live="polite" className="text-small text-success">
-        {justAdded ? `Added ${justAdded}. It'll be here next time too.` : ""}
+        {note ?? ""}
       </p>
 
       {inventoryOptions.length > 0 && (

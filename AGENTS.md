@@ -152,6 +152,18 @@ the count. The old "already in your inventory" error was the wrong answer to a
 reasonable request (see the Assignment 3 feedback: owning two t-shirts was
 unsayable).
 
+**`AddItemForm` now does the same thing, and this was fixed late.** Typing
+something already on a checklist used to raise "T Shirt is already on this
+list." — the identical wrong answer, left behind when the inventory form was
+fixed. It now adds one to the row that exists and reports
+`Socks → 7, in Clothing`; the category picker is ignored for a repeat, so the
+row keeps its section and nothing moves under the person. Naming the section is
+half the fix: the refusal never said *where* the row already was, which on a
+twenty-item list across seven sections is a search. `existingItems` is passed
+whole rather than as labels precisely so the form can reach the row it needs to
+increment. If a third form ever grows an "already there" case, it gets this
+treatment too, not an error.
+
 **Clothing counts stop at ten days, and the trip page says so.**
 `LAUNDRY_CAP_DAYS` in `suggestions.ts` caps the duration-driven quantities —
 underwear and socks at `capped + 1`, tops at `capped` — so a ten-day trip and a
