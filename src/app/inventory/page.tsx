@@ -259,8 +259,25 @@ function KitCategory({
             </span>
 
             <span className="flex flex-wrap items-center gap-2 sm:justify-start">
-              {entry.owned && <Badge tone="accent">Yours</Badge>}
-              {entry.requested && <Badge tone="success">Asked for</Badge>}
+              {/* One badge where there were two.
+
+                  "Yours" and "Asked for" split hairs the page doesn't need
+                  split. "Yours" meant the label has a row in `kit_items`;
+                  "Asked for" meant some trip learned it from a review or a
+                  hand-added item. Both answer the same question — did a person
+                  put this here, or did the generator? — and on a page already
+                  titled "Your Inventory", "Yours" barely said anything at all.
+                  Two badges on that axis, next to two more about usefulness
+                  (Retired, Never used), made four vocabularies to learn per row.
+
+                  Collapsing them is also truer to the app: adding an item does
+                  three things at once (trip, `learned.add`, inventory), so one
+                  gesture should not produce two different labels depending on
+                  which door it came through. What's lost is form-versus-review
+                  provenance, which nothing on this page acts on. */}
+              {(entry.owned || entry.yourOwn || entry.requested) && (
+                <Badge tone="accent">Added by you</Badge>
+              )}
               {entry.dropped && <Badge>Retired</Badge>}
               {!entry.dropped &&
                 entry.unpackedOnFinished > 0 &&

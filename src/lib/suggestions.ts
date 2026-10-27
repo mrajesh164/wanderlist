@@ -54,6 +54,21 @@ export function monthsSpanned(start: string, end: string): number[] {
   return [...out];
 }
 
+/**
+ * Where clothing counts stop growing, because past this you do laundry rather
+ * than carry more. Underwear and socks are `capped + 1`, tops `capped`, so a
+ * ten-day trip and a three-week trip both ask for eleven pairs of socks.
+ *
+ * Exported because the trip page says so out loud when it binds. That sentence
+ * exists because the number looks broken otherwise: move a trip from twelve
+ * days to fifteen, watch "Trousers 4" become 5 while "Underwear 11" sits still,
+ * and the obvious conclusion is that the rebuild is buggy. It isn't — but a
+ * rule nobody states is indistinguishable from a bug. Keep the constant and the
+ * copy wired together; a cap of 10 mentioned as "ten days" in prose is exactly
+ * the pair that drifts.
+ */
+export const LAUNDRY_CAP_DAYS = 10;
+
 export function buildPackingList(
   conditions: Conditions,
   days: number,
@@ -72,7 +87,7 @@ export function buildPackingList(
   );
 
   /* --- quantities from the trip length --- */
-  const capped = Math.min(days, 10); // past ~10 days you do laundry instead
+  const capped = Math.min(days, LAUNDRY_CAP_DAYS);
   specs.push(
     {
       label: "Underwear",

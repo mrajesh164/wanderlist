@@ -16,7 +16,7 @@ import { monthsForApi } from "@/lib/trip-days";
 import { ConditionsNote } from "@/components/ConditionsNote";
 import { EditDates } from "@/components/EditDates";
 import { DestinationArt } from "@/components/DestinationArt";
-import { monthsSpanned } from "@/lib/suggestions";
+import { LAUNDRY_CAP_DAYS, monthsSpanned } from "@/lib/suggestions";
 import {
   conditionsOf,
   countdownLabel,
@@ -231,6 +231,24 @@ function Checklist() {
             </span>
           </div>
           <PackProgress packed={packed} total={total} />
+
+          {/* Said once, here, and only when it actually binds.
+              Clothing counts stop growing after ten days, which is right — you
+              do laundry instead of carrying three weeks of socks — but silently
+              right. Change a long trip's dates and "Trousers 4" becomes 5 while
+              "Underwear 11" doesn't move, which reads as a broken rebuild. A
+              rule nobody states is indistinguishable from a bug.
+
+              Not a per-row note: those were tried and removed, because the same
+              sentence repeated down every climate-driven row said nothing the
+              header hadn't already said better. */}
+          {days > LAUNDRY_CAP_DAYS && (
+            <p className="measure mt-2 text-small text-muted">
+              Clothing counts stop at {LAUNDRY_CAP_DAYS} days — on a trip this
+              long you&apos;ll do laundry rather than pack more, so those
+              numbers stay put if you move the dates.
+            </p>
+          )}
         </div>
       )}
 
